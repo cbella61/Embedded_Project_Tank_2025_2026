@@ -1,9 +1,9 @@
-#include <Arduino.h>
+/*#include <Arduino.h>
 #include <Wire.h>
 //#include "PWMController.h"
 #include "motorController.h"
 
-/* PWM FUNZIONA!!!!*/
+// PWM FUNZIONA!!!!
 
 
 MotorController MC = MotorController(50);
@@ -36,4 +36,4 @@ void loop() {
   delay(500);
 
   
-}
+}*/
