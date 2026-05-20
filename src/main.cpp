@@ -13,7 +13,7 @@ void setup() {
   Serial.begin(9600);
   MC.begin();
 }
-
+//da
 void loop() {
 
   MC.servoTurn(S1, 180);
