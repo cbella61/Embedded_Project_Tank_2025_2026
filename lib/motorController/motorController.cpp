@@ -92,6 +92,13 @@ void MotorController::setPWM(int pin, int value){
 }
 
 /*
+ * 
+ * SERVO
+ * 
+ */
+
+ 
+/*
 Servo degree -> pulse
 p = 1ms -90deg, p = 1.5ms 0 deg, p = 2ms 90deg
 f = 50Hz, T = 20ms
@@ -142,5 +149,61 @@ void MotorController::servoTurn(int servoNumber, int degree){
     }
 
 
+}
+
+/*
+ * 
+ * STEPPER
+ * 
+ */
+
+void MotorController::setStepperMotors(int stepper, int motor1, int motor2){
+    switch (stepper)
+    {
+    case SM1:
+        steppers[0][0] = motor1;
+        steppers[0][1] = motor2;
+        stepIndex[0] = 0;
+        break;
+
+    case SM2:
+        steppers[1][0] = motor1;
+        steppers[1][1] = motor2;
+        stepIndex[1] = 0;
+        break;
+    
+    default:
+        break;
+    }
+}
+
+void MotorController::StepperTurn(int stepper, int steps, int direction, int speed){
+
+}
+
+void MotorController::singleStepClockwise(int stepper, int speed){
+    stepIndex[stepper-1]++;
+    if(stepIndex[stepper-1] > 3) stepIndex[stepper-1] = 0; //Gets back to sequence start
+    
+    DCrun(steppers[stepper-1][0], stepsMatrix[stepIndex[stepper-1]][0], speed);
+    DCrun(steppers[stepper-1][1], stepsMatrix[stepIndex[stepper-1]][1], speed);
+
+    delay(5);
+
+    DCbrake(steppers[stepper-1][0]);
+    DCbrake(steppers[stepper-1][1]);
+}
+
+void MotorController::singleStepCounterClockwise(int stepper, int speed){
+    stepIndex[stepper-1]--;
+    if(stepIndex[stepper-1] < 0) stepIndex[stepper-1] = 3; //Gets back to sequence end
+    
+    DCrun(steppers[stepper-1][0], stepsMatrix[stepIndex[stepper-1]][0], speed);
+    DCrun(steppers[stepper-1][1], stepsMatrix[stepIndex[stepper-1]][1], speed);
+
+    delay(5);
+
+    DCbrake(steppers[stepper-1][0]);
+    DCbrake(steppers[stepper-1][1]);
 }
 
