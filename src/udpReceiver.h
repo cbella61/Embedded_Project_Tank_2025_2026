@@ -5,6 +5,7 @@
 
 struct TankCommand {
     int joyX;
+    int joyY;
     bool zeroPressed;
     bool connected;
 };

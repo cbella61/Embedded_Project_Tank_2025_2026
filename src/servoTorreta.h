@@ -2,6 +2,7 @@
 #define SERVO_TORRETA_H
 #define STEPS_PER_REV 2048 // Number of steps per revolution for the stepper motor
 
+#define SERVO_PIN 6
 #define IN1   11
 #define IN2   10
 #define IN3   9
@@ -22,7 +23,13 @@ void StepperTorretta_stop();
 
 int StepperTorretta_getAngle();
 
-void StepperTorretta_backtoZero();
+// ServoTorretta functions
 
+void ServoTorretta_begin();
+void ServoTorretta_updateJoystick(int joystickValue);
+void ServoTorretta_setAngle(int angle);
+void ServoTorretta_setZero();
+
+int ServoTorretta_getAngle();
 
 #endif // SERVO_TORRETA_H

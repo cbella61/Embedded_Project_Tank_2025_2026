@@ -2,6 +2,9 @@
 #define MAX_ANGLE 180
 #define MIN_ANGLE -180
 
+#define MAX_SERVO_ANGLE 47 // Angolo massimo comandato al servo
+#define MIN_SERVO_ANGLE 0  // Servo.write non gestisce angoli reali negativi
+
 // 180° corrispondono a metà giro
 #define MAX_STEPS ((STEPS_PER_REV * MAX_ANGLE) / 360)
 #define MIN_STEPS ((STEPS_PER_REV * MIN_ANGLE) / 360)
@@ -12,7 +15,13 @@
 
 // Velocità dello stepper
 // Più piccolo = più veloce
+#define Servo_INTERVAL_MS 30
 #define STEP_INTERVAL_MS 2
+
+//servo
+static Servo myServo;
+static int currentServoAngle = 0;
+static unsigned long lastServoUpdateTime = 0;
 
 static int currentSteps = 0;
 static int stepIndex = 0;
@@ -127,3 +136,44 @@ int StepperTorretta_getAngle() {
     return (currentSteps * 360L) / STEPS_PER_REV;
 }
 
+void ServoTorretta_begin() {
+    myServo.attach(SERVO_PIN);
+    ServoTorretta_setAngle(0);
+}
+
+void ServoTorretta_updateJoystick(int joystickValue) {
+    unsigned long now = millis();
+    if (now - lastServoUpdateTime < Servo_INTERVAL_MS) {
+        return;
+    }
+
+    lastServoUpdateTime = now;
+
+    int nextServoAngle = currentServoAngle;
+
+    if (joystickValue < JOYSTICK_CENTER - JOYSTICK_DEADZONE) {
+        nextServoAngle--; // decrementa l'angolo comandato
+    }
+    else if (joystickValue > JOYSTICK_CENTER + JOYSTICK_DEADZONE) {
+        nextServoAngle++; // incrementa l'angolo comandato
+    }
+
+    if (nextServoAngle != currentServoAngle) {
+        ServoTorretta_setAngle(nextServoAngle);
+    }
+}
+
+void ServoTorretta_setAngle(int angle) {
+    currentServoAngle = constrain(angle, MIN_SERVO_ANGLE, MAX_SERVO_ANGLE);
+    myServo.write(currentServoAngle);
+}
+
+void ServoTorretta_setZero() {
+    currentServoAngle = 0;
+    myServo.write(currentServoAngle);
+}
+
+int ServoTorretta_getAngle() {
+    // Servo.read() non misura l'angolo reale: anche questo e' solo il comando salvato.
+    return currentServoAngle;
+}

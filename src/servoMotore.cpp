@@ -21,7 +21,7 @@ void setup() {
 
     StepperTorretta_begin();
     UdpReceiver_begin();
-
+    ServoTorretta_begin();
     Serial.println("Stepper torretta pronto");
     Serial.println("Muovi il joystick a sinistra/destra");
     Serial.println("Premi il pulsante ZERO per impostare la posizione attuale come 0 gradi");
@@ -29,11 +29,14 @@ void setup() {
 
 void loop() {
     TankCommand command = UdpReceiver_update();
-    int joystickValue = command.joyX;
-    StepperTorretta_updateJoystick(command.joyX);
+    int joystickValueX = command.joyX;
+    int joystickValueY = command.joyY;
+    StepperTorretta_updateJoystick(joystickValueX);
+    ServoTorretta_updateJoystick(joystickValueY);
 
     if (command.zeroPressed) {
         StepperTorretta_setZero();
+        ServoTorretta_setAngle(0);
         Serial.println("Zero impostato");
         delay(300);
     }
@@ -43,11 +46,15 @@ void loop() {
         lastPrint = millis();
 
         Serial.print("Joystick: ");
-        Serial.print(joystickValue);
+        Serial.print(joystickValueX);
+        Serial.print(" | ");
+        Serial.print(joystickValueY);
 
         Serial.print(" | Angolo: ");
         Serial.println(StepperTorretta_getAngle());
 
+        Serial.print(" | Servo comandato: ");
+        Serial.println(ServoTorretta_getAngle());
 
         Serial.print(" | Connected: ");
         Serial.println(command.connected ? "Yes" : "No");

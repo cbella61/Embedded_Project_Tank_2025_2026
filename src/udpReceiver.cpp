@@ -14,6 +14,7 @@ static char packetBuffer[64];
 
 static TankCommand lastCommand = {
     512,    // joyX al centro
+    512,   // joyY al centro
     false,  // zeroPressed
     false   // connected
 };
@@ -49,11 +50,13 @@ TankCommand UdpReceiver_update() {
         packetBuffer[len] = '\0';
 
         int joyX = 512;
+        int joyY = 512;
         int zero = 0;
 
-        sscanf(packetBuffer, "X:%d;Z:%d", &joyX, &zero);
+        sscanf(packetBuffer, "X:%d;Y:%d;Z:%d", &joyX, &joyY, &zero);
 
         lastCommand.joyX = constrain(joyX, 0, 1023);
+        lastCommand.joyY = constrain(joyY, 0, 1023);
         lastCommand.zeroPressed = (zero == 1);
         lastCommand.connected = true;
 
@@ -62,6 +65,7 @@ TankCommand UdpReceiver_update() {
 
     if (millis() - lastPacketTime > CONNECTION_TIMEOUT_MS) {
         lastCommand.joyX = 512;
+        lastCommand.joyY = 512;
         lastCommand.zeroPressed = false;
         lastCommand.connected = false;
     }
