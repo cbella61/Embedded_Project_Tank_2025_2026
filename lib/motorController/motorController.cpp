@@ -177,7 +177,23 @@ void MotorController::setStepperMotors(int stepper, int motor1, int motor2){
     }
 }
 
-void MotorController::StepperTurn(int stepper, int steps, int direction, int speed){
+void MotorController::stepperTurn(int stepper, int steps, int direction, int speed){
+    switch(direction){
+        case CLOCKWISE:
+            for(int i=0; i<steps; i++){
+                singleStepClockwise(stepper, speed);
+            }
+            break;
+
+        case COUNTERCLOCKWISE:
+            for(int i=0; i<steps; i++){
+                singleStepCounterClockwise(stepper, speed);
+            }
+            break;
+
+        default:
+            break;
+    }
 
 }
 
