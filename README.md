@@ -2,6 +2,13 @@
 
 Welcome to the official repository for the **Remotely Controlled Tank**, a prototype developed for the Embedded Systems course (2025-2026). This project focuses on building a fully functional, network-controlled robotic vehicle with articulated movement and precise aiming capabilities.
 
+## Project Structure
+- `tank/`: PlatformIO project for the Arduino Uno R4 WiFi tank firmware.
+- `controller-esp32/`: PlatformIO project for the ESP32 remote controller firmware.
+- `Embedded_Project_Tank_2025_2026.code-workspace`: VS Code workspace with both projects separated and named.
+
+Open the `.code-workspace` file in VS Code, then use the PlatformIO actions from the folder you want to build or upload: `Tank Arduino R4` for the tank, `Controller ESP32` for the controller.
+
 ## 📖 Table of Contents
 - [Introduction](#introduction)
 - [Hardware & Components](#hardware--components)
