@@ -132,7 +132,7 @@ class MotorController{
         void DCbrakeAll(); //to stop all DC motors
         void servoTurn(int servoNumber, int degree);
         void setStepperMotors(int stepper, int motor1, int motor2);
-        void stepperTurn(int stepper, int steps, int direction, int speed);
+        void stepperTurn(int stepper, int steps, int direction, int mode);
         void stepperRelease(int stepper);
     private:
         int freq;
