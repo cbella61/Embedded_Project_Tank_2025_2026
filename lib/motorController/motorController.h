@@ -94,10 +94,13 @@ it may not be so precise if you do the math, because we used a for loop to get t
 #define PWM4 7
 
 //Directions
-#define FORWARD 1
-#define BACKWARD 2
-#define CLOCKWISE 3
-#define COUNTERCLOCKWISE 4
+#define FORWARD 0
+#define BACKWARD 1
+#define BREAK 2
+
+//Stepper modes
+#define SINGLE 0
+#define DOUBLE 1
 
 //Motor speed
 #define MAX_SPEED 4096
@@ -116,22 +119,6 @@ it may not be so precise if you do the math, because we used a for loop to get t
 #define S7 14
 #define S8 15
 
-//Stepper direction matrix
-/*
-const int stepsMatrix[4][4] = {
-  {HIGH, LOW,  HIGH, LOW},  // Passo 0: Bobina A+, Bobina B+
-  {LOW,  HIGH, HIGH, LOW},  // Passo 1: Bobina A-, Bobina B+
-  {LOW,  HIGH, LOW,  HIGH}, // Passo 2: Bobina A-, Bobina B-
-  {HIGH, LOW,  LOW,  HIGH}  // Passo 3: Bobina A+, Bobina B-
-};
-*/
-const int stepsMatrix[4][2]{
-  {FORWARD, FORWARD},   // Step 0: Coil A+, Coil B+
-  {BACKWARD, FORWARD},  // Step 1: Coil A-, Coil B+
-  {BACKWARD, BACKWARD}, // Step 2: Coil A-, Coil B-
-  {FORWARD, BACKWARD}   // Step 3: Coil A+, Coil B-
-};
-
 //BOOLEAN
 #define HIGH 1
 #define LOW 0
@@ -146,6 +133,7 @@ class MotorController{
         void servoTurn(int servoNumber, int degree);
         void setStepperMotors(int stepper, int motor1, int motor2);
         void stepperTurn(int stepper, int steps, int direction, int speed);
+        void stepperRelease(int stepper);
     private:
         int freq;
         PWMController PWM;
@@ -153,8 +141,7 @@ class MotorController{
         int stepIndex[2];
         void setPin(int pin, bool value); //To set the control pin INx to on, without PWM
         void setPWM(int pin, int value);
-        void singleStepClockwise(int stepper, int speed);
-        void singleStepCounterClockwise(int stepper, int speed);
+        void singleStep(int stepper, int mode);
 };
 
 #endif

@@ -163,13 +163,13 @@ void MotorController::setStepperMotors(int stepper, int motor1, int motor2){
     case SM1:
         steppers[0][0] = motor1;
         steppers[0][1] = motor2;
-        stepIndex[0] = 0;
+        stepIndex[0] = 1;
         break;
 
     case SM2:
         steppers[1][0] = motor1;
         steppers[1][1] = motor2;
-        stepIndex[1] = 0;
+        stepIndex[1] = 1;
         break;
     
     default:
@@ -177,49 +177,86 @@ void MotorController::setStepperMotors(int stepper, int motor1, int motor2){
     }
 }
 
-void MotorController::stepperTurn(int stepper, int steps, int direction, int speed){
+void MotorController::stepperTurn(int stepper, int steps, int direction, int mode){
+
     switch(direction){
-        case CLOCKWISE:
-            for(int i=0; i<steps; i++){
-                singleStepClockwise(stepper, speed);
-            }
+        case FORWARD:
+            stepIndex[stepper-1] += 2;
+            if(stepIndex[stepper-1] > 7) stepIndex[stepper-1] = 0; //Gets back to sequence start
             break;
 
-        case COUNTERCLOCKWISE:
-            for(int i=0; i<steps; i++){
-                singleStepCounterClockwise(stepper, speed);
-            }
+        case BACKWARD:
+            stepIndex[stepper-1] -= 2;
+            if(stepIndex[stepper-1] < 0) stepIndex[stepper-1] = 7; //Gets back to sequence end
+            break;
+        
+        default:
+
+            break;
+    }
+
+}
+
+void MotorController::singleStep(int stepper, int mode){
+    uint8_t latch_state = 0; //Sets all motors to 0
+    switch(mode){
+        case SINGLE:
+            if(stepIndex[stepper-1] % 2) stepIndex[stepper-1]++; //If not on even step
+            if(stepIndex[stepper-1] > 7) stepIndex[stepper-1] = 0; //Gets back to sequence start
+            break;
+
+        case DOUBLE:
+            if(!(stepIndex[stepper-1] % 2)) stepIndex[stepper-1]++; //If not on odd step
+            if(stepIndex[stepper-1] > 7) stepIndex[stepper-1] = 1; //Gets back to sequence start
             break;
 
         default:
             break;
     }
 
+    switch (stepIndex[stepper-1]) {
+      case 0:
+        latch_state |= 0x1; // energize coil 1 only
+        break;
+      case 1:
+        latch_state |= 0x3; // energize coil 1+2
+        break;
+      case 2:
+        latch_state |= 0x2; // energize coil 2 only
+        break;
+      case 3:
+        latch_state |= 0x6; // energize coil 2+3
+        break;
+      case 4:
+        latch_state |= 0x4; // energize coil 3 only
+        break;
+      case 5:
+        latch_state |= 0xC; // energize coil 3+4
+        break;
+      case 6:
+        latch_state |= 0x8; // energize coil 4 only
+        break;
+      case 7:
+        latch_state |= 0x9; // energize coil 1+4
+        break;
+    }
+
+    if (latch_state & 0x1) {
+      DCrun(steppers[stepper-1][0], FORWARD, 4095);
+    }
+    if (latch_state & 0x2) {
+      DCrun(steppers[stepper-1][1], FORWARD, 4095);
+    }
+    if (latch_state & 0x4) {
+      DCrun(steppers[stepper-1][0], BACKWARD, 4095);
+    }
+    if (latch_state & 0x8) {
+      DCrun(steppers[stepper-1][1], BACKWARD, 4095);
+    }
 }
 
-void MotorController::singleStepClockwise(int stepper, int speed){
-    stepIndex[stepper-1]++;
-    if(stepIndex[stepper-1] > 3) stepIndex[stepper-1] = 0; //Gets back to sequence start
-    
-    DCrun(steppers[stepper-1][0], stepsMatrix[stepIndex[stepper-1]][0], speed);
-    DCrun(steppers[stepper-1][1], stepsMatrix[stepIndex[stepper-1]][1], speed);
-
-    delay(5);
-
-    DCbrake(steppers[stepper-1][0]);
-    DCbrake(steppers[stepper-1][1]);
-}
-
-void MotorController::singleStepCounterClockwise(int stepper, int speed){
-    stepIndex[stepper-1]--;
-    if(stepIndex[stepper-1] < 0) stepIndex[stepper-1] = 3; //Gets back to sequence end
-    
-    DCrun(steppers[stepper-1][0], stepsMatrix[stepIndex[stepper-1]][0], speed);
-    DCrun(steppers[stepper-1][1], stepsMatrix[stepIndex[stepper-1]][1], speed);
-
-    delay(5);
-
-    DCbrake(steppers[stepper-1][0]);
-    DCbrake(steppers[stepper-1][1]);
+void MotorController::stepperRelease(int stepper){
+    DCbrake(steppers[stepper][0]);
+    DCbrake(steppers[stepper][1]);
 }
 
