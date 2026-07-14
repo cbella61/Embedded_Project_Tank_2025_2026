@@ -1,9 +1,9 @@
 {
   "meta": {
     "units": "mm",
-    "revision": 5,
-    "revision_note": "Cinematica corretta: tetto e statore stepper fissi, albero separato e solidale alla base D100 rotante. Servo SG90 fissati tramite alette reali M2.5; eliminati barrette e perni pieni. Aggiunti cornetti a croce reali come riferimenti e due guance stampabili regolabili con foro centrale di servizio.",
-    "build_stage": "full_editable_reference_assembly",
+    "revision": 6,
+    "revision_note": "Sottoassieme autonomo della sola torretta da verificare visivamente prima della preparazione degli STL. Albero stepper reale doppia-D diametro 5 mm, 3 mm tra i piatti e lunghezza sporgente 6 mm; sede base con 0.2 mm di gioco per lato. Cinematica: tetto e statore fissi, base D100 e parte superiore in azimut, sola culla/cannone in elevazione.",
+    "build_stage": "cover_and_modular_turret",
     "rule": "Le quote confermate restano vincolanti. Le quote marcate provisional_editable_first_pass sono una prima proposta autorizzata dall'utente e rimangono parametriche. Null significa quota ancora sconosciuta."
   },
   "mechanical_fasteners": {
@@ -228,11 +228,15 @@
       "shaft_fit_clearance_per_side": 0.2,
       "shaft_bore_diameter": 5.4,
       "shaft_bore_flat_to_flat": 3.4,
+      "coupling_hub_outer_diameter": 12,
+      "coupling_hub_height_below_base": 2,
+      "coupling_hub_roof_clearance_per_side": 0.25,
+      "minimum_shaft_engagement": 4,
       "mounting_radius": 19,
       "mounting_hole_diameter": 3.2,
       "nut_across_flats": 5.8,
       "nut_trap_depth": 2.6,
-      "status": "Base aumentata a diametro 100 mm per lasciare la corona cavi r23.5-r32.5 completamente libera e spostare il sostegno assiale all'esterno. Le quattro viti del telaio sono a r19, completamente dentro la corona, così dadi e fori non attraversano la pista. La sede D trasmette la coppia; stampare prima il provino dedicato e correggere il gioco parametrico se necessario."
+      "status": "Base diametro 100 mm con mozzo centrale diametro 12 mm che scende 2 mm nel passaggio del tetto. La sede doppia-D 5.4 x 3.4 mm impegna almeno 4 mm dell'albero reale 5 x 3 x 6 mm senza affidargli il peso assiale. Il gioco nominale è 0.2 mm su ciascun lato. La corona cavi r23.5-r32.5 resta libera e le quattro viti del telaio a r19 non attraversano la pista. Stampare prima il provino dedicato e correggere il gioco parametrico se necessario."
     },
     "azimuth_support": {
       "thrust_washer_inner_diameter": 76,

@@ -153,6 +153,10 @@ REQUIRED_COVER_TURRET_VALUES = (
     "turret.rotating_base.shaft_fit_clearance_per_side",
     "turret.rotating_base.shaft_bore_diameter",
     "turret.rotating_base.shaft_bore_flat_to_flat",
+    "turret.rotating_base.coupling_hub_outer_diameter",
+    "turret.rotating_base.coupling_hub_height_below_base",
+    "turret.rotating_base.coupling_hub_roof_clearance_per_side",
+    "turret.rotating_base.minimum_shaft_engagement",
     "turret.rotating_base.mounting_radius",
     "turret.rotating_base.mounting_hole_diameter",
     "turret.rotating_base.nut_across_flats",
@@ -2126,9 +2130,21 @@ def _validate_sketch_line_world_axis(
 ):
     """Verifica in coordinate globali la linea usata come asse personalizzato."""
     world_line = sketch_line.worldGeometry
-    axis = world_line.direction if world_line else None
-    if not axis:
+    if not world_line:
         raise RuntimeError(f"Fusion non restituisce l'asse globale {name}")
+    start = world_line.startPoint
+    end = world_line.endPoint
+    dx = end.x - start.x
+    dy = end.y - start.y
+    dz = end.z - start.z
+    magnitude = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if magnitude <= 1e-9:
+        raise RuntimeError(f"La linea asse {name} ha lunghezza nulla")
+    axis = adsk.core.Vector3D.create(
+        dx / magnitude,
+        dy / magnitude,
+        dz / magnitude,
+    )
     components = (abs(axis.x), abs(axis.y), abs(axis.z))
     expected = tuple(abs(value) for value in expected_axis)
     if any(abs(actual - wanted) > tolerance for actual, wanted in zip(components, expected)):
@@ -2511,6 +2527,21 @@ def _create_cover_and_modular_turret(document, design, root, data):
     adapter_gap_above_roof = (
         azimuth_support["thrust_washer_thickness"] - washer_seat_depth
     )
+    hub_wall = (
+        rotating["coupling_hub_outer_diameter"]
+        - rotating["shaft_bore_diameter"]
+    ) / 2.0
+    if hub_wall < 2.0:
+        raise RuntimeError("Il mozzo doppia-D deve avere almeno 2 mm di parete radiale.")
+    hub_bottom_clearance_above_stepper = (
+        cover["roof_thickness"]
+        + adapter_gap_above_roof
+        - rotating["coupling_hub_height_below_base"]
+    )
+    if hub_bottom_clearance_above_stepper < 0.8:
+        raise RuntimeError(
+            "Il mozzo rotante deve lasciare almeno 0.8 mm sopra la faccia dello stepper."
+        )
     guide_nominal_engagement = (
         azimuth_support["fixed_guide_height"] - adapter_gap_above_roof
     )
@@ -2533,11 +2564,13 @@ def _create_cover_and_modular_turret(document, design, root, data):
         )
     shaft_engagement = (
         stepper["shaft_length"]
-        - cover["roof_thickness"]
-        - adapter_gap_above_roof
+        - hub_bottom_clearance_above_stepper
     )
-    if shaft_engagement < 4.0:
-        raise RuntimeError("La sede D deve impegnare almeno 4 mm dell'albero stepper.")
+    if shaft_engagement < rotating["minimum_shaft_engagement"]:
+        raise RuntimeError(
+            "La sede doppia-D deve impegnare almeno "
+            f"{rotating['minimum_shaft_engagement']:.1f} mm dell'albero stepper."
+        )
     anchor_half_x = cable["cable_tie_slot_length"] / 2.0
     anchor_half_y = cable["cable_tie_slot_width"] / 2.0
     frame_standoff_radius = azimuth_support["upper_frame_standoff_diameter"] / 2.0
@@ -2910,6 +2943,9 @@ def _create_cover_and_modular_turret(document, design, root, data):
         ("torre_base_spessore", rotating["thickness"], "Adattatore rotante"),
         ("torre_sede_D_diametro", rotating["shaft_bore_diameter"], "Mozzo D stepper"),
         ("torre_sede_D_quota_tra_piatti", rotating["shaft_bore_flat_to_flat"], "Mozzo doppia-D stepper"),
+        ("torre_mozzo_accoppiamento_diametro", rotating["coupling_hub_outer_diameter"], "Mozzo inferiore nel tetto"),
+        ("torre_mozzo_accoppiamento_altezza", rotating["coupling_hub_height_below_base"], "Impegno albero da 6 mm"),
+        ("torre_mozzo_gioco_tetto", rotating["coupling_hub_roof_clearance_per_side"], "Gioco radiale per lato"),
         ("torre_rondella_assiale_DI", azimuth_support["thrust_washer_inner_diameter"], "Appoggio assiale esterno ai cavi"),
         ("torre_rondella_assiale_DE", azimuth_support["thrust_washer_outer_diameter"], "Appoggio assiale esterno ai cavi"),
         ("torre_rondella_assiale_spessore", azimuth_support["thrust_washer_thickness"], "Appoggio assiale esterno ai cavi"),
@@ -3124,7 +3160,11 @@ def _create_cover_and_modular_turret(document, design, root, data):
         cover_component,
         f"{cover_total_height - stepper['mounting_countersink_depth']} mm",
     )
-    shaft_roof_clearance = max(8.0, stepper["shaft_diameter"] + 2.0)
+    shaft_roof_clearance = max(
+        8.0,
+        rotating["coupling_hub_outer_diameter"]
+        + 2.0 * rotating["coupling_hub_roof_clearance_per_side"],
+    )
     _cut_round_hole(
         cover_component,
         roof_plane,
@@ -3500,13 +3540,29 @@ def _create_cover_and_modular_turret(document, design, root, data):
         0,
         "torre_base_spessore",
     )
+    coupling_hub_height = rotating["coupling_hub_height_below_base"]
+    coupling_hub_bottom = adapter_bottom - coupling_hub_height
+    coupling_hub_plane = _offset_plane(
+        adapter_component, f"{coupling_hub_bottom} mm"
+    )
+    _cylinder_prism(
+        adapter_component,
+        coupling_hub_plane,
+        "Mozzo_inferiore_accoppiamento_stepper",
+        rotating["coupling_hub_outer_diameter"],
+        0,
+        0,
+        f"{coupling_hub_height + 0.2} mm",
+        adsk.fusion.FeatureOperations.JoinFeatureOperation,
+    )
+    coupling_bore_depth = coupling_hub_height + rotating["thickness"] + 0.2
     _cut_round_hole(
         adapter_component,
-        adapter_plane,
+        coupling_hub_plane,
         rotating["shaft_bore_diameter"],
         0,
         0,
-        "torre_base_spessore",
+        f"{coupling_bore_depth} mm",
         "Preforo_circolare_sede_D_stepper",
     )
     bore_radius = rotating["shaft_bore_diameter"] / 2.0
@@ -3522,7 +3578,7 @@ def _create_cover_and_modular_turret(document, design, root, data):
         rotating["shaft_bore_diameter"] + 0.4,
         -(bore_radius + bore_half_flat) / 2.0,
         0,
-        "torre_base_spessore",
+        f"{coupling_bore_depth} mm",
         adsk.fusion.FeatureOperations.JoinFeatureOperation,
     )
     _rectangle_prism_at(
@@ -3533,7 +3589,7 @@ def _create_cover_and_modular_turret(document, design, root, data):
         rotating["shaft_bore_diameter"] + 0.4,
         (bore_radius + bore_half_flat) / 2.0,
         0,
-        "torre_base_spessore",
+        f"{coupling_bore_depth} mm",
         adsk.fusion.FeatureOperations.JoinFeatureOperation,
     )
 
@@ -5608,7 +5664,7 @@ def _export(design, build_stage):
     elif build_stage == "battery_holder":
         stem = "supporto_batteria_standalone_parametrico_v2_apertura_utile_10mm"
     elif build_stage == "cover_and_modular_turret":
-        stem = "coperchio_supporto_stepper_torretta_modulare_v5_cinematica_servo_M2_5"
+        stem = "torretta_modulare_stampabile_v6_doppia_D_5x3x6"
     else:
         stem = "carro_armato_parametrico"
     f3d_path = os.path.join(EXCHANGE_DIR, f"{stem}.f3d")
