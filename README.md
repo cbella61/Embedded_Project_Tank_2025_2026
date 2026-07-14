@@ -1,69 +1,59 @@
-# Remotely Controlled Tank - Embedded Systems Project 2025/2026
+# Remotely Controlled Tank
 
-Welcome to the official repository for the **Remotely Controlled Tank**, a prototype developed for the Embedded Systems course (2025-2026). This project focuses on building a fully functional, network-controlled robotic vehicle with articulated movement and precise aiming capabilities.
+Firmware project for a tank based on an Arduino Uno R4 WiFi, an Emakefun PS2X & Motor Drive Board, and an ESP32 hand controller.
 
-## Project Structure
-- `tank/`: PlatformIO project for the Arduino Uno R4 WiFi tank firmware.
-- `controller-esp32/`: PlatformIO project for the ESP32 remote controller firmware.
-- `Embedded_Project_Tank_2025_2026.code-workspace`: VS Code workspace with both projects separated and named.
+## Projects
 
-Open the `.code-workspace` file in VS Code, then use the PlatformIO actions from the folder you want to build or upload: `Tank Arduino R4` for the tank, `Controller ESP32` for the controller.
+- `tank/`: firmware for the Arduino Uno R4 WiFi on the tank.
+- `controller-esp32/`: firmware for the ESP32 controller.
+- `docs/tank_shield_wiring_guide.md`: current wiring and configuration guide.
+- `docs/tank_shield_wiring_guide.pdf`: printable copy of the wiring guide.
+- `docs/code_report.html`: complete explanation of the current firmware.
+- `docs/code_report.pdf`: printable code report.
 
-## 📖 Table of Contents
-- [Introduction](#introduction)
-- [Hardware & Components](#hardware--components)
-- [Mechanical Implementation](#mechanical-implementation)
-- [Controller Architecture](#controller-architecture)
-- [Communication Protocol](#communication-protocol)
-- [Future Improvements](#future-improvements)
-- [Team Members](#team-members)
+## Controls
 
-## 🚀 Introduction
-The core of this system is the **Arduino Uno R4 WiFi** microcontroller, which manages all operational aspects. By leveraging the integrated ESP32-S3 on the Arduino, the tank hosts a web server that serves as the primary control interface, allowing for remote operation via a network connection.
+| Input | Function |
+| --- | --- |
+| Joy1 X/Y | Differential drive for the two DC track motors |
+| Joy2 X | Horizontal turret stepper |
+| Joy2 Y | Paired elevation servos |
+| GPIO25 button | Set logical turret zero and elevation zero |
+| GPIO26 button | Fire relay pulse |
 
-## 🛠 Hardware & Components
-### Core Components:
-- **Arduino Uno R4 WiFi**: Main microcontroller and web server host.
-- **EmakeFun PS2X & Motor Drive Board**: Primary motor driver interface.
-- **2x DC Motors**: For independent track movement.
-- **2x Servomotors**: For the turret (horizontal rotation) and the cannon muzzle (vertical inclination).
-- **Laser Module**: For pointing and aiming assistance.
-- **Buzzer**: Functions as an audible signal/horn.
+Both joystick modules are mounted rotated, so the controller firmware swaps
+physical X and Y before sending the logical controls. The ESP32 calibrates all
+four centers at startup; keep both sticks centered while it boots.
 
-*Note: Power supply/batteries are currently under evaluation for type and voltage.*
+The ESP32 sends UDP packets to the tank access point:
 
-## ⚙️ Mechanical Implementation
-- **Mobility**: The tank utilizes **LEGO tracks** driven by two independent DC motors. This setup enables differential steering for agile maneuverability.
-- **Weapon System**: The turret incorporates precise control mechanisms using servomotors for both horizontal panning and vertical tilting, ensuring accurate aiming.
+```text
+V1;driveX;driveY;turretX;elevationY;zero;fire
+```
 
-## 🎮 Controller Architecture
-The remote controller is custom-built using an **ESP32** and includes:
-- **2x Analog Joysticks**: Used for tank movement (track control) and turret aiming.
-- **Push Button**: For firing the cannon.
-- **Switch**: To toggle between operating modes (e.g., movement mode vs. turret mode).
-- **Status LED**: Indicates if the connection with the tank has been successfully established.
+The tank creates the `Tank_AP` WiFi network and listens on UDP port `4210`.
+If the connection drops, the ESP32 keeps running and retries the WiFi connection
+every `3 seconds`; the tank stops safely after its `500 ms` UDP timeout.
 
-## 📡 Communication Protocol
-Communication between the controller and the tank is handled via **UDP** over WiFi. 
-- The tank acts as an **Access Point** with the static IP address: `192.168.4.115`.
-- Data is transmitted using a specific 15-character formatted string:
-  - `[0]` **Mode**: `m` (movement) or `t` (turret).
-  - `[1-4]` **Speed 1**: First track speed/direction, or overall tank direction/speed (max 4096).
-  - `[5-8]` **Speed 2**: Second track speed/direction, or turret vertical inclination (± degrees, max 4096).
-  - `[9-12]` **Turret Pan**: Turret horizontal rotation (± degrees, max 4096).
-  - `[13]` **Fire**: Firing action state.
-  - `[14]` **Terminator**: String terminator character.
+## Build
 
-*(Note: The team is currently evaluating whether to handle string pre-processing on the controller side or directly on the tank).*
+```powershell
+C:\Users\selmi\.platformio\penv\Scripts\pio.exe run -d tank
+C:\Users\selmi\.platformio\penv\Scripts\pio.exe run -d controller-esp32
+```
 
-## 🔮 Future Improvements
-- **Cannon Incline Calculator**: Integration of an accelerometer to calculate tilt.
-- **Target Distance Measurement**: Using an ultrasound sensor to calculate the tank's distance from the target.
-- **Automated Firing System**: Implementation of a state machine for automatic loading and firing of the cannon.
-- **Web UI Enhancements**: Adding a trajectory angle suggestion feature via the web server interface.
+## Hardware Notes
 
-## 👥 Team Members
-- **Christian Bella**
-- **Selmir Kusi**
-- **Francesco Martella**
-- **Alice Sedioli**
+- Left track DC motor: shield `M3`.
+- Right track DC motor: shield `M1` (`M2` left unused if it spins by itself).
+- Fire relay signal on tank: Arduino/shield `D7`.
+- Relay module: `+` to 5V, `-` to GND, `S` to `D7`.
+- Cannon output: use relay `COM` and `NO`; `NO` goes toward the cannon/load.
+- Fire cooldown: one shot every `12 seconds`.
+- Horizontal turret driver: `D2-D5` to driver `IN1-IN4`, with common ground.
+- Elevation servos: `S5` and `S6`.
+- Servo A uses `0-47` degrees; servo B is mirrored around `90` degrees.
+- Differential turning reaches 55% at logical X 700, 70% at 999, and 100% from 1000.
+- The tank firmware checks for the PCA9685 shield at I2C address `0x60`, `0x40`, or `0x7F` during startup.
+
+Use the wiring guide for supply, jumper, and signal-pin details.

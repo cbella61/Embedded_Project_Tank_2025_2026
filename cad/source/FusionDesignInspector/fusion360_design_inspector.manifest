@@ -1,0 +1,10 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "script",
+  "author": "Embedded Project Tank",
+  "description": {
+    "": "Legge quote e corpi del progetto Fusion attivo senza modificare il modello."
+  },
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

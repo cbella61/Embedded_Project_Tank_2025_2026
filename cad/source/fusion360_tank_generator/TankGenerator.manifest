@@ -1,0 +1,10 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "script",
+  "author": "Embedded Project Tank",
+  "description": {
+    "": "Genera il modello parametrico del carro armato da quote confermate."
+  },
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

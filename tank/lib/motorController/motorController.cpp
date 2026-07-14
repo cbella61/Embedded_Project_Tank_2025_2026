@@ -1,146 +1,129 @@
 #include "motorController.h"
 
-MotorController::MotorController(int freq){
-    this->freq = freq;
-    PWM = PWMController(0x60);
+namespace {
+// Limiti sicuri del pulse servo sulla PCA9685 a 50 Hz.
+// Evitiamo impulsi troppo estremi per non mandare i servo oltre il fine corsa.
+const int SERVO_MIN_PULSE = 110;
+const int SERVO_MAX_PULSE = 500;
+} // namespace
+
+MotorController::MotorController(int frequency, uint8_t address)
+    : frequency(frequency), pwm(address) {}
+
+void MotorController::setAddress(uint8_t address) {
+    // Ricrea il driver PWM con l'indirizzo I2C trovato dal main.
+    pwm = PWMController(address);
 }
 
-void MotorController::begin(){
-    /*
-    PWM controller initialization
-    */
-    PWM.begin();
-    PWM.setPWMFreq(freq);
+void MotorController::begin() {
+    // Avvia il chip PCA9685 e imposta la frequenza condivisa da tutti i canali.
+    pwm.begin();
+    pwm.setPWMFreq(frequency);
 }
 
-void MotorController::DCrun(int motorNumber, int direction, int speed){
-    int vel = speed;
-    if(vel > MAX_SPEED) vel = MAX_SPEED;
-    switch(motorNumber){
-        case M1:
-            setPWM(PWM1, vel);
-            if(direction == FORWARD) setPin(IN1, HIGH);
-            else setPin(IN1, LOW);
-            break;
+void MotorController::DCrun(int motorNumber, int direction, int speed) {
+    int directionChannel = -1;
+    int speedChannel = -1;
 
-        case M2:
-            setPWM(PWM2, vel);
-            if(direction == FORWARD) setPin(IN2, HIGH);
-            else setPin(IN2, LOW);
-            break;
+    // Ogni M della shield corrisponde a due canali PCA9685:
+    // uno decide la direzione, l'altro decide la velocita PWM.
+    switch (motorNumber) {
+    case M1:
+        directionChannel = M1_DIRECTION_CHANNEL;
+        speedChannel = M1_SPEED_CHANNEL;
+        break;
+    case M2:
+        directionChannel = M2_DIRECTION_CHANNEL;
+        speedChannel = M2_SPEED_CHANNEL;
+        break;
+    case M3:
+        directionChannel = M3_DIRECTION_CHANNEL;
+        speedChannel = M3_SPEED_CHANNEL;
+        break;
+    case M4:
+        directionChannel = M4_DIRECTION_CHANNEL;
+        speedChannel = M4_SPEED_CHANNEL;
+        break;
+    default:
+        return;
+    }
 
-        case M3:
-            setPWM(PWM3, vel);
-            if(direction == FORWARD) setPin(IN3, HIGH);
-            else setPin(IN3, LOW);
-            break;
+    // Prima imposta la velocita, poi il verso.
+    setPwmChannel(speedChannel, constrain(speed, 0, MAX_SPEED));
+    setDigitalChannel(directionChannel, direction == FORWARD);
+}
 
-        case M4:
-            setPWM(PWM4, vel);
-            if(direction == FORWARD) setPin(IN4, HIGH);
-            else setPin(IN4, LOW);
-
+void MotorController::DCbrake(int motorNumber) {
+    // Spegne velocita PWM e porta bassa la direzione del motore scelto.
+    switch (motorNumber) {
+    case M1:
+        setPwmChannel(M1_SPEED_CHANNEL, 0);
+        setDigitalChannel(M1_DIRECTION_CHANNEL, false);
+        break;
+    case M2:
+        setPwmChannel(M2_SPEED_CHANNEL, 0);
+        setDigitalChannel(M2_DIRECTION_CHANNEL, false);
+        break;
+    case M3:
+        setPwmChannel(M3_SPEED_CHANNEL, 0);
+        setDigitalChannel(M3_DIRECTION_CHANNEL, false);
+        break;
+    case M4:
+        setPwmChannel(M4_SPEED_CHANNEL, 0);
+        setDigitalChannel(M4_DIRECTION_CHANNEL, false);
+        break;
     }
 }
 
-void MotorController::DCbrake(int motorNumber){
-    switch(motorNumber){
-        case M1:
-            setPWM(PWM1, 0);
-            setPin(IN1, LOW);
-            break;
+void MotorController::DCbrakeAll() {
+    // Usato all'avvio e nei casi di sicurezza.
+    DCbrake(M1);
+    DCbrake(M2);
+    DCbrake(M3);
+    DCbrake(M4);
+}
 
-        case M2:
-            setPWM(PWM2, 0);
-            setPin(IN2, LOW);
-            break;
+void MotorController::bipolarStepperStop(int motorA, int motorB) {
+    // Uno stepper bipolare usa due uscite motore: spegniamo entrambe.
+    DCbrake(motorA);
+    DCbrake(motorB);
+}
 
-        case M3:
-            setPWM(PWM3, 0);
-            setPin(IN3, LOW);
-            break;
+void MotorController::servoTurn(int servoNumber, int degree) {
+    // Converte i gradi del servo nel valore PWM PCA9685.
+    int constrainedDegree = constrain(degree, 0, 180);
+    int pulse = map(constrainedDegree, 0, 180, SERVO_MIN_PULSE, SERVO_MAX_PULSE);
+    setPwmChannel(servoNumber, pulse);
+}
 
-        case M4:
-            setPWM(PWM4, 0);
-            setPin(IN4, LOW);
+void MotorController::servoPairTurn(int servoA, int servoB, int degree, int invertedDegreeBase) {
+    // Il primo servo segue l'angolo normale.
+    int firstAngle = constrain(degree, 0, 180);
 
+    // Il secondo servo si muove al contrario rispetto al primo.
+    int secondAngle = constrain(invertedDegreeBase - firstAngle, 0, 180);
+
+    servoTurn(servoA, firstAngle);
+    servoTurn(servoB, secondAngle);
+}
+
+void MotorController::setDigitalChannel(int channel, bool value) {
+    // Per forzare LOW sulla PCA9685 serve il bit full-off.
+    // Per forzare HIGH serve il bit full-on.
+    pwm.setPWM(channel, value ? 4096 : 0, value ? 0 : 4096);
+}
+
+void MotorController::setPwmChannel(int channel, int value) {
+    // value <= 0 spegne completamente il canale.
+    if (value <= 0) {
+        pwm.setPWM(channel, 0, 4096);
+    }
+    // value >= 4096 accende completamente il canale.
+    else if (value >= MAX_SPEED) {
+        pwm.setPWM(channel, 4096, 0);
+    }
+    // Altrimenti genera PWM normale da 0 fino al valore richiesto.
+    else {
+        pwm.setPWM(channel, 0, value);
     }
 }
-void MotorController::DCbrakeAll(){
-    setPWM(PWM1, 0);
-    setPin(IN1, LOW);
-    setPWM(PWM2, 0);
-    setPin(IN2, LOW);
-    setPWM(PWM3, 0);
-    setPin(IN3, LOW);
-    setPWM(PWM4, 0);
-    setPin(IN4, LOW);
-}
-
-void MotorController::setPin(int pin, bool value){
-    if(value == HIGH)
-        PWM.setPWM(pin, 4096, 0);
-    else    
-        PWM.setPWM(pin, 0, 0);
-}
-
-void MotorController::setPWM(int pin, int value){
-    if(value > 4095)
-        PWM.setPWM(pin, 4096, 0);
-    else    
-        PWM.setPWM(pin, 0, value);
-}
-
-/*
-Servo degree -> pulse
-p = 1ms -90deg, p = 1.5ms 0 deg, p = 2ms 90deg
-f = 50Hz, T = 20ms
-d 1% = 0,2ms
-d 10% = 2ms max
-d 5% = 1ms min
-Levels -> 4096
-lmax = 4096/10 = 409
-lmin = 4096/20 = 205
-degrees from 0 to 180.
-ldiff = lmax - lmin = 204
-l = (ldiff / 180) * deg + lmin
-*/
-void MotorController::servoTurn(int servoNumber, int degree){
-    int deg = degree;
-    if(deg > 180) deg = 180;
-    float level = LMAX - LMIN;
-    level /= 180;
-    level *= deg;
-    level += LMIN;
-    int l = level;
-    Serial.println(level);
-    Serial.println(l);
-    switch(servoNumber){
-        case S1:
-            setPWM(S1, l);
-            break;
-        case S2:
-            setPWM(S2, l);
-            break;
-        case S3:
-            setPWM(S3, l);
-            break;
-        case S4:
-            setPWM(S4, l);
-            break;
-        case S5:
-            setPWM(S5, l);
-            break;
-        case S6:
-            setPWM(S6, l);
-            break;
-        case S7:
-            setPWM(S7, l);
-            break;
-        case S8:
-            setPWM(S8, l);
-    }
-
-
-}
-

@@ -1,0 +1,2 @@
+from FusionDesignInspector import run
+

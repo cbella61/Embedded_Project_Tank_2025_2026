@@ -1,106 +1,43 @@
-//Library for controlling DC motors and Servomotors
-
-/*
---DC MOTOR CONTROL
-The DC motors are controlled with the TB6612FNG chip.
-The TB6612FNG is an H-Bridge chip used to control motors.
-It can control 2 separate DC motors.
-It has 3 control input per motor.
-They are IN1 and IN2, which are used to control the direction of the motor,
-and PWM which is used to regulate the speed trough a PWM signal.
-The pin IN1 is directly connected to the PWM generator, while IN2 is IN1 inverted.
-
-
---SERVO MOTOR--
-Servo motors are controlled with a 50 Hz PWM pulse.
-The pulses width ranges from 1ms to 2ms with 1.5ms in the center of rotation.
-it may not be so precise if you do the math, because we used a for loop to get the minimum and maximum signal value.
-
-
---CONNECTIONS--
-
-              TB6612FNG
-           ---------------
-      PWM10|             |M1A
-     ------|IN1A         |-----
-     ~PWM10|             |M1B
-     ------|IN2A         |-----
-       PWM8|             |
-     ------|PWMA         |
-           |             |
-      PWM11|             |M2A
-     ------|             |-----
-     ~PWM11|             |M2B
-     ------|             |-----
-      PWM13|PWMB         |
-     ------|             |
-           ---------------
-
-              TB6612FNG
-           ---------------
-       PWM4|             |M3A
-     ------|IN1A         |-----
-      ~PWM4|             |M3B
-     ------|IN2A         |-----
-       PWM2|             |
-     ------|PWMA         |
-           |             |
-       PWM5|             |M4A
-     ------|             |-----
-      ~PWM5|             |M4B
-     ------|             |-----
-       PWM7|PWMB         |
-     ------|             |
-           ---------------
-
-    PWM0 -> SERVO1
-    PWM1 -> SERVO2
-    PWM3 -> SERVO3
-    PWM6 -> SERVO4
-    PWM9 -> SERVO5
-    PWM12 -> SERVO6
-    PWM14 -> SERVO7
-    PWM15 -> SERVO8
-
-
-*/
-
-//If we add an angle parameter for every servo motor we can have the actual angle of a servo in case we need if
-//Example to have a slow rotation or an increment/decremet.
-
-#ifndef __MOTOR_CONTROLLER_H__
-#define __MOTOR_CONTROLLER_H__
+#ifndef MOTOR_CONTROLLER_H
+#define MOTOR_CONTROLLER_H
 
 #include "PWMController.h"
 
-//Motors
+/*
+ * MOTOR CONTROLLER DELLA SHIELD
+ *
+ * Questo wrapper rende piu' semplice usare la shield:
+ * - comandi motore DC: M1, M2, M3, M4
+ * - comandi servo: S1-S8
+ *
+ * Internamente la shield usa una PCA9685. Ogni uscita motore ha un canale per
+ * direzione e un canale per velocita PWM.
+ */
+
+// Uscite motore della shield. Uno stepper bipolare dei cingoli usa due uscite.
 #define M1 1
 #define M2 2
 #define M3 3
 #define M4 4
 
-//Motor pins
-#define IN1 10
-#define PWM1 8
-#define IN2 11
-#define PWM2 13
-#define IN3 4
-#define PWM3 2
-#define IN4 5
-#define PWM4 7
+// Canali PCA9685 collegati internamente ai driver motore TB6612.
+#define M1_DIRECTION_CHANNEL 10
+#define M1_SPEED_CHANNEL 8
+#define M2_DIRECTION_CHANNEL 11
+#define M2_SPEED_CHANNEL 13
+#define M3_DIRECTION_CHANNEL 4
+#define M3_SPEED_CHANNEL 2
+#define M4_DIRECTION_CHANNEL 5
+#define M4_SPEED_CHANNEL 7
 
-//Directions
+// Direzioni accettate da DCrun().
 #define FORWARD 1
 #define BACKWARD 2
 
-//Motor speed
+// La PCA9685 ha risoluzione PWM a 12 bit: 0-4096.
 #define MAX_SPEED 4096
 
-//Servo motors levels
-#define LMAX 540
-#define LMIN 80
-
-//Servo motors pins
+// Canali dei connettori servo verificati sulla shield usata in questo progetto.
 #define S1 0
 #define S2 1
 #define S3 3
@@ -110,24 +47,38 @@ it may not be so precise if you do the math, because we used a for loop to get t
 #define S7 14
 #define S8 15
 
+class MotorController {
+  public:
+    // La frequenza deve restare a 50 Hz perche' la stessa PCA9685 pilota i servo.
+    explicit MotorController(int frequency, uint8_t address = 0x60);
 
-//BOOLEAN
-#define HIGH 1
-#define LOW 0
+    // Seleziona l'indirizzo I2C della PCA9685 prima di begin().
+    void setAddress(uint8_t address);
 
-class MotorController{
-    public:
-        MotorController(int freq); //constructor with frequency parameter in order to set PWM freq.
-        void begin();
-        void DCrun(int motorNumber, int direction, int speed); //to make a DC motor run at a certain speed
-        void DCbrake(int motorNumber); //to stop a DC motor
-        void DCbrakeAll(); //to stop all DC motors
-        void servoTurn(int servoNumber, int degree);
-    private:
-        int freq;
-        PWMController PWM;
-        void setPin(int pin, bool value); //To set the control pin INx to on, without PWM
-        void setPWM(int pin, int value);
+    // Avvia la PCA9685 e applica la frequenza configurata.
+    void begin();
+
+    // Pilota una uscita motore della shield con direzione e velocita PWM.
+    void DCrun(int motorNumber, int direction, int speed);
+
+    // Ferma una o tutte le uscite motore della shield.
+    void DCbrake(int motorNumber);
+    void DCbrakeAll();
+    void bipolarStepperStop(int motorA, int motorB);
+
+    // Manda un comando servo standard 0-180 gradi a un canale servo.
+    void servoTurn(int servoNumber, int degree);
+
+    // Comanda due servo collegati, con il secondo specchiato attorno a un angolo base.
+    void servoPairTurn(int servoA, int servoB, int degree, int invertedDegreeBase);
+
+  private:
+    int frequency;
+    PWMController pwm;
+
+    // Helper interni: uno per segnali digitali, uno per valori PWM veri.
+    void setDigitalChannel(int channel, bool value);
+    void setPwmChannel(int channel, int value);
 };
 
 #endif
