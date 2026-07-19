@@ -29,6 +29,10 @@ struct ControllerData {
 // Configura i due pulsanti.
 void JoystickReader_begin();
 
+// Dopo una reconnessione o una condizione anomala, inibisce i comandi finche'
+// joystick e pulsanti non restano neutrali/rilasciati per il tempo previsto.
+void JoystickReader_requireNeutralBeforeCommands();
+
 // Legge joystick e pulsanti. Gli ADC vengono mappati da 0-4095 a 0-1023.
 ControllerData JoystickReader_read();
 

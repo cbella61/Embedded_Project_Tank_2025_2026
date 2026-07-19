@@ -127,7 +127,7 @@ blockquote {
 </head>
 <body>
 <h1>Tank Shield - Wiring Guide e configurazione</h1>
-<p>Firmware: <code>Embedded_Project_Tank_2025_2026</code><br>Tank: Arduino Uno R4 WiFi + Emakefun PS2X &amp; Motor Drive Board<br>Controller: ESP32 Dev Module<br>Aggiornamento: 13 luglio 2026</p>
+<p>Firmware: <code>Embedded_Project_Tank_2025_2026</code><br>Tank: Arduino Uno R4 WiFi + Emakefun PS2X &amp; Motor Drive Board<br>Controller: ESP32 Dev Module<br>Aggiornamento: 19 luglio 2026</p>
 <h2>1. Mappa generale</h2>
 <table>
 <thead>
@@ -375,80 +375,57 @@ negativo alimentazione         -&gt; negativo del cannone
 <td>elevazione servo</td>
 </tr>
 </tbody></table>
-<p>Per invertire soltanto il verso di un asse usa le quattro costanti <code>DRIVE_X_INVERTED</code>, <code>DRIVE_Y_INVERTED</code>, <code>TURRET_X_INVERTED</code> ed <code>ELEVATION_Y_INVERTED</code> in <code>controller-esp32/src/joystickReader.cpp</code>.</p>
+<p>Per invertire soltanto il verso di un asse usa le quattro costanti <code>DRIVE_X_INVERTED</code>, <code>DRIVE_Y_INVERTED</code>, <code>TURRET_X_INVERTED</code> ed <code>ELEVATION_Y_INVERTED</code> in <code>controller-esp32/src/joystickReader.cpp</code>. L&#39;orientamento degli assi Joy1 viene corretto solo qui; sul tank restano soltanto le inversioni dei due motori fisici (<code>LEFT/RIGHT_TRACK_INVERTED</code>).</p>
 <h2>7. Calibrazione joystick</h2>
 <p>All&#39;avvio dell&#39;ESP32:</p>
 <ol>
 <li>Lascia entrambi i joystick fermi al centro.</li>
-<li>Il firmware aspetta <code>800 ms</code>.</li>
-<li>Legge ogni asse <code>80</code> volte e calcola il centro reale.</li>
-<li>Rimappa il centro misurato a <code>512</code>, mantenendo disponibili gli estremi <code>0-1023</code>.</li>
+<li>Il firmware aspetta <code>600 ms</code>.</li>
+<li>Legge ogni asse <code>80</code> volte, a distanza di <code>2 ms</code>, e calcola il centro reale. La calibrazione completa richiede quindi circa <code>1,24 s</code> piu&#39; il piccolo overhead di elaborazione.</li>
+<li>Accetta la calibrazione solo se ogni asse e&#39; vicino a <code>512</code> (massimo scostamento <code>70</code>) e non oscilla oltre <code>40</code> punti durante il campionamento.</li>
+<li>Rimappa il centro misurato a <code>512</code>, mantenendo disponibili gli estremi <code>0-1023</code>. Se la calibrazione non e&#39; valida, invia solo il comando sicuro e richiede un riavvio con joystick fermi.</li>
+<li>Anche con calibrazione valida, prima di armare i comandi richiede joystick neutrali e pulsanti rilasciati per <code>400 ms</code>.</li>
 </ol>
-<p>La deadzone del controller e&#39; <code>80</code>. Il tank applica anche una deadzone guida di <code>100</code>; torretta e servo usano <code>200</code>.</p>
+<p>Le deadzone non sono tutte uguali: ogni filtro ha uno scopo diverso.</p>
 <table>
 <thead>
 <tr>
-<th>Sistema</th>
-<th>Centro</th>
-<th>Zona ferma approssimativa</th>
+<th>Filtro</th>
+<th>Valore e zona ferma</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>Controller ESP32</td>
-<td><code>512</code></td>
-<td>corretta rispetto al centro misurato</td>
+<td>Joy1 guida sul controller</td>
+<td><code>DRIVE_INPUT_DEADZONE = 20</code>: meno di <code>20</code> punti dal centro calibrato</td>
 </tr>
 <tr>
-<td>Cingoli tank</td>
-<td><code>512</code></td>
-<td>circa <code>412-612</code></td>
+<td>Joy2 torretta/elevazione sul controller</td>
+<td><code>TURRET_INPUT_DEADZONE = 80</code>: meno di <code>80</code> punti dal centro calibrato</td>
 </tr>
 <tr>
-<td>Torretta e servo</td>
-<td><code>512</code></td>
-<td><code>312-712</code></td>
+<td>Cingoli sul tank</td>
+<td><code>TRACK_COMMAND_DEADZONE = 100</code>: meno di <code>100</code> punti dal centro UDP, prima e dopo il mixing</td>
+</tr>
+<tr>
+<td>Torretta e servo sul tank</td>
+<td><code>TURRET_JOYSTICK_DEADZONE = 200</code>: meno di <code>200</code> punti dal centro UDP</td>
 </tr>
 </tbody></table>
-<p>Non toccare i joystick durante la calibrazione iniziale.</p>
+<p>La deadzone Joy1 piccola evita di sommare una zona morta eccessiva a quella di protezione del tank. Non toccare i joystick durante la calibrazione iniziale e durante l&#39;attesa di armamento.</p>
 <h2>8. Guida differenziale e velocita</h2>
-<p>Joy1 Y controlla avanti/indietro in modo lineare e puo&#39; raggiungere la velocita massima. Joy1 X controlla soltanto la sterzata.</p>
-<pre><code class="language-text">forward = driveY - 512
-turn    = curva(driveX - 512)
-sinistro = forward + turn
-destro   = forward - turn
+<p>Joy1 Y controlla avanti/indietro in modo lineare e puo&#39; raggiungere la velocita massima. Joy1 X controlla soltanto la sterzata. Non esistono piu&#39; curve, fasce o soglie intermedie di sterzo.</p>
+<pre><code class="language-text">forward  = decode(driveY)
+turn     = decode(driveX)
+sinistro = constrain(forward + turn, -512, +512)
+destro   = constrain(forward - turn, -512, +512)
 </code></pre>
-<p>Curva attuale della sterzata:</p>
-<table>
-<thead>
-<tr>
-<th>Posizione Joy1 X</th>
-<th>Comando massimo di sterzata</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>dal centro fino a <code>700</code></td>
-<td>crescita progressiva fino al <code>55%</code></td>
-</tr>
-<tr>
-<td>da <code>700</code> a <code>999</code></td>
-<td>crescita progressiva dal <code>55%</code> al <code>70%</code></td>
-</tr>
-<tr>
-<td>da <code>1000</code> a <code>1023</code></td>
-<td><code>100%</code></td>
-</tr>
-</tbody></table>
-<p>Le fasce valgono anche nel verso opposto in modo simmetrico rispetto al centro <code>512</code>. Il passaggio al <code>100%</code> vicino al fondo corsa e&#39; intenzionale.</p>
+<p><code>decode()</code> limita l&#39;ingresso alla scala <code>0-1023</code>, sottrae il centro <code>512</code> e applica la deadzone del tank. A joystick Y in avanti entrambi i cingoli ricevono lo stesso comando; con Joy1 X un lato accelera e l&#39;altro rallenta. Con il solo Joy1 X, i due cingoli girano in versi opposti e il tank ruota sul posto. Il <code>constrain()</code> evita che la somma superi il comando massimo consentito.</p>
 <p>Configurazioni principali in <code>tank/src/trackController.h</code>:</p>
-<pre><code class="language-cpp">#define DRIVE_DEADZONE 100
+<pre><code class="language-cpp">#define TRACK_COMMAND_DEADZONE 100
 #define LEFT_TRACK_MIN_PWM 900
 #define RIGHT_TRACK_MIN_PWM 900
-#define TRACK_TURN_MID_JOYSTICK_VALUE 700
-#define TRACK_TURN_MID_SPEED_PERCENT 55
-#define TRACK_TURN_PRE_MAX_JOYSTICK_VALUE 999
-#define TRACK_TURN_PRE_MAX_SPEED_PERCENT 70
-#define TRACK_TURN_FULL_SPEED_JOYSTICK_VALUE 1000
 </code></pre>
+<p>Quando viene richiesta un&#39;inversione di marcia, ogni cingolo viene prima frenato a PWM zero e riattivato dopo <code>30 ms</code> (<code>TRACK_REVERSE_DEAD_TIME_MS</code> in <code>tank/src/trackController.cpp</code>). La pausa vale anche se il joystick passa brevemente dal centro prima dell&#39;altro verso.</p>
 <h2>9. Protocollo UDP e frequenza</h2>
 <p>Il controller invia circa <code>100 pacchetti al secondo</code>, uno ogni <code>10 ms</code>:</p>
 <pre><code class="language-text">V1;driveX;driveY;turretX;elevationY;zero;fire
@@ -457,7 +434,8 @@ destro   = forward - turn
 <pre><code class="language-text">V1;512;900;512;512;0;0
 </code></pre>
 <p>Il tank conserva l&#39;ultimo comando valido. Se non riceve pacchetti per <code>500 ms</code>, centra tutti gli assi, disattiva i pulsanti e ferma i movimenti.</p>
-<p>Se l&#39;ESP32 perde <code>Tank_AP</code>, non blocca il programma: interrompe l&#39;invio, tenta la riconnessione ogni <code>3 secondi</code> e lascia che il tank entri nel timeout di sicurezza. Quando il WiFi torna disponibile, aggiorna l&#39;IP dal gateway, riapre UDP sulla porta <code>4210</code> e riprende automaticamente l&#39;invio.</p>
+<p>All&#39;avvio il tank resta disarmato. Se <code>WiFi.beginAP()</code> o l&#39;apertura del socket UDP falliscono, non entra in <code>while(true)</code>: resta nello stato sicuro e ritenta ogni <code>3 secondi</code>. Quando AP e UDP sono pronti, e dopo ogni boot, timeout o guasto rete, il tank richiede <code>3</code> pacchetti consecutivi con tutti gli assi entro <code>+/-20</code> dal centro e pulsanti rilasciati prima di riarmare gli attuatori.</p>
+<p>Se l&#39;ESP32 perde <code>Tank_AP</code>, non blocca il programma: interrompe l&#39;invio, tenta la riconnessione ogni <code>3 secondi</code> e lascia che il tank entri nel timeout di sicurezza. Quando il WiFi torna disponibile, aggiorna l&#39;IP dal gateway, riapre UDP sulla porta <code>4210</code>, richiede di nuovo la neutralita&#39; del controller e riprende automaticamente l&#39;invio solo dopo il riarmo.</p>
 <h2>10. Alimentazione</h2>
 <p>Secondo il manuale Emakefun V1.4:</p>
 <ul>
@@ -500,14 +478,19 @@ GND buck -&gt; GND Arduino/shield
 <td>costanti <code>*_INVERTED</code></td>
 </tr>
 <tr>
-<td>Deadzone controller</td>
+<td>Deadzone Joy1 guida</td>
 <td><code>controller-esp32/src/joystickReader.cpp</code></td>
-<td><code>CONTROLLER_DEADZONE</code></td>
+<td><code>DRIVE_INPUT_DEADZONE</code></td>
+</tr>
+<tr>
+<td>Deadzone Joy2</td>
+<td><code>controller-esp32/src/joystickReader.cpp</code></td>
+<td><code>TURRET_INPUT_DEADZONE</code></td>
 </tr>
 <tr>
 <td>Deadzone cingoli</td>
 <td><code>tank/src/trackController.h</code></td>
-<td><code>DRIVE_DEADZONE</code></td>
+<td><code>TRACK_COMMAND_DEADZONE</code></td>
 </tr>
 <tr>
 <td>Velocita singolo cingolo</td>
@@ -515,9 +498,9 @@ GND buck -&gt; GND Arduino/shield
 <td><code>LEFT/RIGHT_TRACK_MIN/MAX_PWM</code>, <code>LEFT/RIGHT_TRACK_PWM_PERCENT</code></td>
 </tr>
 <tr>
-<td>Fasce sterzata</td>
-<td><code>tank/src/trackController.h</code></td>
-<td>costanti <code>TRACK_TURN_*</code></td>
+<td>Pausa prima dell&#39;inversione</td>
+<td><code>tank/src/trackController.cpp</code></td>
+<td><code>TRACK_REVERSE_DEAD_TIME_MS</code></td>
 </tr>
 <tr>
 <td>Direzione cingolo</td>
@@ -548,6 +531,16 @@ GND buck -&gt; GND Arduino/shield
 <td>Pausa fra colpi</td>
 <td><code>tank/src/main.cpp</code></td>
 <td><code>FIRE_RELAY_COOLDOWN_MS</code></td>
+</tr>
+<tr>
+<td>Retry AP/UDP del tank</td>
+<td><code>tank/src/udpReceiver.cpp</code></td>
+<td><code>NETWORK_RETRY_INTERVAL_MS</code></td>
+</tr>
+<tr>
+<td>Riarmo UDP del tank</td>
+<td><code>tank/src/udpReceiver.cpp</code></td>
+<td><code>REARM_NEUTRAL_PACKET_COUNT</code>, <code>REARM_NEUTRAL_TOLERANCE</code></td>
 </tr>
 </tbody></table>
 <h2>12. Schema rapido</h2>

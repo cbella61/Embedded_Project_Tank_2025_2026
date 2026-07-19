@@ -29,14 +29,16 @@
 // Il centro ideale e' 512.
 #define DRIVE_JOYSTICK_CENTER 512
 
-// Zona morta: se il joystick resta vicino al centro, il cingolo e' fermo.
-// Se da fermo un lato prova ancora a muoversi, aumenta di 10/20.
-#define DRIVE_DEADZONE 100
+// Protezione finale del comando cingolo nella scala UDP 0--1023.
+// Viene applicata sia prima sia dopo il mixing differenziale: non deve coincidere
+// con DRIVE_INPUT_DEADZONE dell'ESP32, che filtra soltanto il rumore del joystick.
+// Se da fermo un lato prova ancora a muoversi, aumenta di 10/20 e riprova sul tank fisico.
+#define TRACK_COMMAND_DEADZONE 40
 
 // Ogni cingolo usa una porta motore DC della shield.
 // M2 resta libero: usa M3 per il sinistro e M1 per il destro.
-#define LEFT_TRACK_MOTOR M3
-#define RIGHT_TRACK_MOTOR M1
+#define LEFT_TRACK_MOTOR M1
+#define RIGHT_TRACK_MOTOR M3
 
 // PWM minimo e massimo separato per ogni cingolo.
 // I due motori DC non sono mai identici: uno puo' partire prima o girare piu'
@@ -57,33 +59,25 @@
 #define LEFT_TRACK_PWM_PERCENT 100
 #define RIGHT_TRACK_PWM_PERCENT 100
 
-// Curva solo per la sterzata/rotazione su Joy1 X.
-// Avanti/indietro su Joy1 Y resta lineare e puo' arrivare al massimo.
-#define TRACK_TURN_CURVE_PERCENT 75
+// Frequenza massima di refresh I2C quando il comando resta invariato.
+// Un nuovo comando e uno stop di sicurezza non aspettano il periodo successivo.
+#define TRACK_COMMAND_REFRESH_INTERVAL_MS 20
 
-// Fasce della sterzata differenziale:
-// - fino a 700: sale progressivamente fino al 55%;
-// - da 700 a 999: sale progressivamente dal 55% al 70%;
-// - da 1000 in poi: passa al 100%.
-#define TRACK_TURN_MID_JOYSTICK_VALUE 700
-#define TRACK_TURN_MID_SPEED_PERCENT 55
-#define TRACK_TURN_PRE_MAX_JOYSTICK_VALUE 999
-#define TRACK_TURN_PRE_MAX_SPEED_PERCENT 70
-#define TRACK_TURN_FULL_SPEED_JOYSTICK_VALUE 1000
+// Lo sterzo Joy1 X e' lineare: nessuna curva o soglia intermedia nascosta.
+// La sua intensita' entra direttamente nel mixing differenziale sotto.
 
-// Cambia questi valori solo se direzione o sterzo sono invertiti.
-#define DRIVE_X_INVERTED false
-#define DRIVE_Y_INVERTED false
+// L'orientamento degli assi del joystick viene corretto una sola volta sull'ESP32.
+// Qui restano esclusivamente le inversioni dovute al cablaggio dei due motori.
 #define LEFT_TRACK_INVERTED false
 #define RIGHT_TRACK_INVERTED false
 
 // Inizializza i due motori DC dei cingoli sulla shield.
 void TrackController_begin(MotorController& controller);
 
-// Applica il mixing differenziale di Joy1 ai due cingoli.
+// Applica il mixing differenziale lineare di Joy1 ai due cingoli.
 void TrackController_update(int driveX, int driveY);
 
-// Disalimenta entrambi i cingoli.
+// Porta entrambi i cingoli a PWM zero tramite DCbrake().
 void TrackController_stop();
 
 #endif

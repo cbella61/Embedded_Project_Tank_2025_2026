@@ -11,107 +11,110 @@
  * M1 e M3, con mixing differenziale per girare come un tank.
  */
 
-// Puntatore alla shield ricevuta dal main in TrackController_begin().
-static MotorController* shield = nullptr;
+// Puntatore al driver PWM ricevuto dal main in TrackController_begin().
+static MotorController* motorController = nullptr;
 
-// Converte un asse joystick 0-1023 in un valore centrato attorno a zero.
+// Prima di invertire un cingolo, il firmware applica una breve pausa a PWM zero.
+// Il valore va validato sul driver reale: e' un miglioramento software, non sostituisce
+// il cutoff hardware in caso di blocco del bus I2C.
+#define TRACK_REVERSE_DEAD_TIME_MS 30
+
+// La deadzone deve lasciare almeno un comando positivo e uno negativo disponibili.
+static_assert(TRACK_COMMAND_DEADZONE > 0 && TRACK_COMMAND_DEADZONE < DRIVE_JOYSTICK_CENTER,
+              "TRACK_COMMAND_DEADZONE must stay inside the joystick range");
+
+struct TrackMotorState {
+    // Ultimo verso passato a DCRun(). E' una richiesta software, non una misura del motore.
+    int lastRequestedDirection;
+    // Ultimo verso prima di DCbrake(). Resta memorizzato anche se il joystick torna al centro,
+    // cosi' un'inversione immediata rispetta comunque il tempo di pausa.
+    int directionBeforeStop;
+    int pendingDirection;
+    int pendingSpeed;
+    bool waitingForReverse;
+    unsigned long stoppedAt;
+};
+
+static TrackMotorState leftTrackState = {0, 0, 0, 0, false, 0};
+static TrackMotorState rightTrackState = {0, 0, 0, 0, false, 0};
+
+// Evita di riscrivere continuamente gli stessi quattro registri I2C mentre il
+// joystick resta fermo. Il refresh periodico conserva comunque il controllo di
+// salute della shield; uno stop bypassa questa limitazione.
+static int lastDriveX = DRIVE_JOYSTICK_CENTER;
+static int lastDriveY = DRIVE_JOYSTICK_CENTER;
+static bool hasLastDriveCommand = false;
+static unsigned long lastTrackCommandTime = 0;
+static bool stopCommandIssued = false;
+static unsigned long lastStopCommandTime = 0;
+
+static TrackMotorState* stateForTrackMotor(int motorNumber) {
+    if (motorNumber == LEFT_TRACK_MOTOR) {
+        return &leftTrackState;
+    }
+
+    if (motorNumber == RIGHT_TRACK_MOTOR) {
+        return &rightTrackState;
+    }
+
+    return nullptr;
+}
+
+// Decodifica un asse UDP 0--1023 in un comando firmato centrato su zero.
 // Esempio: 512 diventa 0, 1023 diventa circa +511, 0 diventa -512.
-static int centeredAxis(int value, bool inverted) {
+// L'inversione dell'asse e' responsabilita' del controller ESP32, non del tank.
+static int decodeDriveAxis(int value) {
     int centered = constrain(value, 0, 1023) - DRIVE_JOYSTICK_CENTER;
 
-    // Pulisce il rumore del joystick prima del mixing differenziale.
-    // Cosi' un piccolo errore su X non fa partire un cingolo quando vuoi andare dritto.
-    if (abs(centered) < DRIVE_DEADZONE) {
+    // Primo filtro lato tank: protegge anche da sender UDP diversi dall'ESP32.
+    // Il filtro finale di applyTrackMotorCommand() resta necessario dopo forward +/- turn.
+    if (abs(centered) < TRACK_COMMAND_DEADZONE) {
         centered = 0;
     }
 
-    return inverted ? -centered : centered;
+    return centered;
 }
 
-// Ferma un motore DC della shield.
+// Porta un cingolo a PWM zero e annulla un'eventuale inversione in attesa.
 static void stopTrackMotor(int motorNumber) {
-    if (shield == nullptr) {
+    if (motorController == nullptr) {
         return;
     }
 
-    shield->DCbrake(motorNumber);
+    TrackMotorState* state = stateForTrackMotor(motorNumber);
+    motorController->DCbrake(motorNumber);
+
+    if (state != nullptr) {
+        // Non azzerare directionBeforeStop: serve se dopo il centro viene chiesto il verso opposto.
+        if (state->lastRequestedDirection != 0) {
+            state->directionBeforeStop = state->lastRequestedDirection;
+            state->stoppedAt = millis();
+        }
+
+        state->lastRequestedDirection = 0;
+        state->pendingDirection = 0;
+        state->pendingSpeed = 0;
+        state->waitingForReverse = false;
+    }
 }
 
 // Mappa avanti/indietro in modo lineare: Joy1 Y deve poter arrivare al massimo.
 static int mapLinearTrackSpeed(int magnitude, int minPwm, int maxPwm) {
     int fullMagnitude = DRIVE_JOYSTICK_CENTER - 1;
-    int limitedMagnitude = constrain(magnitude, DRIVE_DEADZONE, fullMagnitude);
+    int limitedMagnitude = constrain(magnitude, TRACK_COMMAND_DEADZONE, fullMagnitude);
 
-    return map(limitedMagnitude, DRIVE_DEADZONE, fullMagnitude, minPwm, maxPwm);
+    return map(limitedMagnitude, TRACK_COMMAND_DEADZONE, fullMagnitude, minPwm, maxPwm);
 }
 
-// Applica la curva solo al comando di sterzata Joy1 X.
-// Cosi' avanti/indietro resta normale, mentre la rotazione ha piu' livelli medi.
-static int shapeTurnCommand(int turnCommand) {
-    if (turnCommand == 0) {
-        return 0;
+// Applica un comando firmato a un cingolo, includendo PWM e pausa sicura di inversione.
+static void applyTrackMotorCommand(int motorNumber, bool inverted, int command, int minPwm,
+                                   int maxPwm, int pwmPercent) {
+    if (motorController == nullptr) {
+        return;
     }
 
-    int sign = turnCommand > 0 ? 1 : -1;
-    int magnitude = abs(turnCommand);
-
-    int midMagnitude =
-        abs(constrain(TRACK_TURN_MID_JOYSTICK_VALUE, 0, 1023) - DRIVE_JOYSTICK_CENTER);
-    int preMaxMagnitude =
-        abs(constrain(TRACK_TURN_PRE_MAX_JOYSTICK_VALUE, 0, 1023) - DRIVE_JOYSTICK_CENTER);
-    int fullSpeedMagnitude =
-        abs(constrain(TRACK_TURN_FULL_SPEED_JOYSTICK_VALUE, 0, 1023) - DRIVE_JOYSTICK_CENTER);
-
-    int fullOutputMagnitude = DRIVE_JOYSTICK_CENTER - 1;
-    int midOutputMagnitude =
-        (fullOutputMagnitude * constrain(TRACK_TURN_MID_SPEED_PERCENT, 0, 100)) / 100;
-    int preMaxOutputMagnitude =
-        (fullOutputMagnitude * constrain(TRACK_TURN_PRE_MAX_SPEED_PERCENT, 0, 100)) / 100;
-
-    midMagnitude = constrain(midMagnitude, DRIVE_DEADZONE + 1, fullOutputMagnitude - 2);
-    preMaxMagnitude = constrain(preMaxMagnitude, midMagnitude + 1, fullOutputMagnitude - 1);
-    fullSpeedMagnitude = constrain(fullSpeedMagnitude, preMaxMagnitude + 1, fullOutputMagnitude);
-    midOutputMagnitude = constrain(midOutputMagnitude, DRIVE_DEADZONE, fullOutputMagnitude - 2);
-    preMaxOutputMagnitude =
-        constrain(preMaxOutputMagnitude, midOutputMagnitude + 1, fullOutputMagnitude - 1);
-
-    int limitedMagnitude = constrain(magnitude, DRIVE_DEADZONE, fullSpeedMagnitude);
-    int shapedMagnitude = DRIVE_DEADZONE;
-
-    if (limitedMagnitude <= midMagnitude) {
-        long input = limitedMagnitude - DRIVE_DEADZONE;
-        long inputRange = midMagnitude - DRIVE_DEADZONE;
-        long outputRange = midOutputMagnitude - DRIVE_DEADZONE;
-
-        long linearOutput = (input * outputRange) / inputRange;
-        long curvedOutput = (input * input * outputRange) / (inputRange * inputRange);
-        long curvePercent = constrain(TRACK_TURN_CURVE_PERCENT, 0, 100);
-        long mixedOutput =
-            (linearOutput * (100 - curvePercent) + curvedOutput * curvePercent) / 100;
-
-        shapedMagnitude = DRIVE_DEADZONE + mixedOutput;
-    } else if (limitedMagnitude <= preMaxMagnitude) {
-        long input = limitedMagnitude - midMagnitude;
-        long inputRange = preMaxMagnitude - midMagnitude;
-        long outputRange = preMaxOutputMagnitude - midOutputMagnitude;
-
-        shapedMagnitude = midOutputMagnitude + (input * outputRange) / inputRange;
-    } else {
-        long highInput = limitedMagnitude - preMaxMagnitude;
-        long highInputRange = fullSpeedMagnitude - preMaxMagnitude;
-        long highOutputRange = fullOutputMagnitude - preMaxOutputMagnitude;
-
-        shapedMagnitude =
-            preMaxOutputMagnitude + (highInput * highOutputRange) / highInputRange;
-    }
-
-    return sign * constrain(shapedMagnitude, 0, fullOutputMagnitude);
-}
-
-// Trasforma un comando joystick positivo/negativo in direzione e PWM motore.
-static void updateTrackMotor(int motorNumber, bool inverted, int command, int minPwm, int maxPwm,
-                             int pwmPercent) {
-    if (shield == nullptr) {
+    TrackMotorState* state = stateForTrackMotor(motorNumber);
+    if (state == nullptr) {
         return;
     }
 
@@ -120,8 +123,9 @@ static void updateTrackMotor(int motorNumber, bool inverted, int command, int mi
     maxPwm = constrain(maxPwm, minPwm, MAX_SPEED);
     pwmPercent = constrain(pwmPercent, 0, 150);
 
-    // Dentro la deadzone il motore resta spento.
-    if (abs(command) < DRIVE_DEADZONE) {
+    // Secondo filtro lato tank: il mixing puo' lasciare piccolo un solo cingolo anche
+    // quando forward e turn erano entrambi fuori dalla deadzone individuale.
+    if (abs(command) < TRACK_COMMAND_DEADZONE) {
         stopTrackMotor(motorNumber);
         return;
     }
@@ -130,31 +134,93 @@ static void updateTrackMotor(int motorNumber, bool inverted, int command, int mi
 
     // Avanti/indietro e il comando finale dei motori restano lineari.
     int speed = mapLinearTrackSpeed(magnitude, minPwm, maxPwm);
-    speed = constrain((speed * pwmPercent) / 100, 0, MAX_SPEED);
+    speed = constrain(static_cast<int>((static_cast<long>(speed) * pwmPercent) / 100), 0, MAX_SPEED);
 
     int direction = command > 0 ? FORWARD : BACKWARD;
     if (inverted) {
         direction = direction == FORWARD ? BACKWARD : FORWARD;
     }
 
-    shield->DCrun(motorNumber, direction, speed);
+    unsigned long now = millis();
+
+    // Durante la pausa di inversione conserva soltanto l'ultimo comando,
+    // senza riaccendere il ponte H prima che il tempo minimo sia trascorso.
+    if (state->waitingForReverse) {
+        state->pendingDirection = direction;
+        state->pendingSpeed = speed;
+
+        if (now - state->stoppedAt < TRACK_REVERSE_DEAD_TIME_MS) {
+            return;
+        }
+
+        motorController->DCrun(motorNumber, state->pendingDirection, state->pendingSpeed);
+        state->lastRequestedDirection = state->pendingDirection;
+        state->directionBeforeStop = state->pendingDirection;
+        state->waitingForReverse = false;
+        return;
+    }
+
+    // Non invertire direttamente un motore in movimento: frena, attendi e poi riapplica.
+    if (state->lastRequestedDirection != 0 && state->lastRequestedDirection != direction) {
+        motorController->DCbrake(motorNumber);
+        state->directionBeforeStop = state->lastRequestedDirection;
+        state->lastRequestedDirection = 0;
+        state->pendingDirection = direction;
+        state->pendingSpeed = speed;
+        state->waitingForReverse = true;
+        state->stoppedAt = now;
+        return;
+    }
+
+    // Se e' gia' stato fermato, anche il percorso centro -> verso opposto deve attendere.
+    // Senza questo controllo il vecchio codice poteva bypassare i 30 ms dopo il centro.
+    if (state->lastRequestedDirection == 0 && state->directionBeforeStop != 0 &&
+        state->directionBeforeStop != direction &&
+        now - state->stoppedAt < TRACK_REVERSE_DEAD_TIME_MS) {
+        state->pendingDirection = direction;
+        state->pendingSpeed = speed;
+        state->waitingForReverse = true;
+        return;
+    }
+
+    // Il comando viene aggiornato a intervalli controllati anche se invariato:
+    // non fare caching permanente, altrimenti un guasto del bus puo' restare
+    // invisibile al controllo di salute della shield.
+    motorController->DCrun(motorNumber, direction, speed);
+    state->lastRequestedDirection = direction;
+    state->directionBeforeStop = direction;
 }
 
 void TrackController_begin(MotorController& controller) {
     // Salva il riferimento alla shield inizializzata dal main.
-    shield = &controller;
+    motorController = &controller;
+    hasLastDriveCommand = false;
+    stopCommandIssued = false;
 
     // Parte sempre con entrambi i cingoli spenti.
     TrackController_stop();
 }
 
 void TrackController_update(int driveX, int driveY) {
-    // Joy1 Y: avanti/indietro. Joy1 X: sterzata.
-    int forward = centeredAxis(driveY, DRIVE_Y_INVERTED);
-    int turn = centeredAxis(driveX, DRIVE_X_INVERTED);
+    unsigned long now = millis();
+    driveX = constrain(driveX, 0, 1023);
+    driveY = constrain(driveY, 0, 1023);
 
-    // La curva dei livelli medi vale solo per la rotazione/sterzata.
-    turn = shapeTurnCommand(turn);
+    bool commandChanged =
+        !hasLastDriveCommand || driveX != lastDriveX || driveY != lastDriveY;
+    if (!commandChanged && now - lastTrackCommandTime < TRACK_COMMAND_REFRESH_INTERVAL_MS) {
+        return;
+    }
+
+    lastDriveX = driveX;
+    lastDriveY = driveY;
+    hasLastDriveCommand = true;
+    lastTrackCommandTime = now;
+    stopCommandIssued = false;
+
+    // Joy1 Y: avanti/indietro. Joy1 X: sterzata.
+    int forward = decodeDriveAxis(driveY);
+    int turn = decodeDriveAxis(driveX);
 
     // Mixing differenziale:
     // - avanti dritto: entrambi i motori girano uguali
@@ -163,13 +229,21 @@ void TrackController_update(int driveX, int driveY) {
     int leftCommand = constrain(forward + turn, -DRIVE_JOYSTICK_CENTER, DRIVE_JOYSTICK_CENTER);
     int rightCommand = constrain(forward - turn, -DRIVE_JOYSTICK_CENTER, DRIVE_JOYSTICK_CENTER);
 
-    updateTrackMotor(LEFT_TRACK_MOTOR, LEFT_TRACK_INVERTED, leftCommand, LEFT_TRACK_MIN_PWM,
-                     LEFT_TRACK_MAX_PWM, LEFT_TRACK_PWM_PERCENT);
-    updateTrackMotor(RIGHT_TRACK_MOTOR, RIGHT_TRACK_INVERTED, rightCommand, RIGHT_TRACK_MIN_PWM,
-                     RIGHT_TRACK_MAX_PWM, RIGHT_TRACK_PWM_PERCENT);
+    applyTrackMotorCommand(LEFT_TRACK_MOTOR, LEFT_TRACK_INVERTED, leftCommand, LEFT_TRACK_MIN_PWM,
+                           LEFT_TRACK_MAX_PWM, LEFT_TRACK_PWM_PERCENT);
+    applyTrackMotorCommand(RIGHT_TRACK_MOTOR, RIGHT_TRACK_INVERTED, rightCommand,
+                           RIGHT_TRACK_MIN_PWM, RIGHT_TRACK_MAX_PWM, RIGHT_TRACK_PWM_PERCENT);
 }
 
 void TrackController_stop() {
+    unsigned long now = millis();
+    if (stopCommandIssued && now - lastStopCommandTime < TRACK_COMMAND_REFRESH_INTERVAL_MS) {
+        return;
+    }
+
     stopTrackMotor(LEFT_TRACK_MOTOR);
     stopTrackMotor(RIGHT_TRACK_MOTOR);
+    hasLastDriveCommand = false;
+    stopCommandIssued = true;
+    lastStopCommandTime = now;
 }

@@ -48,6 +48,7 @@ static MotorController shield(50);
 
 // Diventa true solo se la PCA9685 viene trovata su I2C.
 static bool shieldReady = false;
+static bool shieldFaultReported = false;
 
 // Stato del relay sparo.
 static bool fireRelayActive = false;
@@ -92,8 +93,30 @@ static void setFireRelay(bool active) {
 // Usa il fronte di salita e poi aspetta 12 secondi prima di accettare un altro colpo.
 static void updateFireRelay(bool firePressed, bool connected) {
     static bool lastFirePressed = false;
+    static bool fireInputArmed = false;
 
-    bool newFirePress = connected && firePressed && !lastFirePressed;
+    // Dopo timeout o perdita del collegamento il relay deve spegnersi subito.
+    // Il successivo collegamento non puo' riutilizzare una pressione rimasta attiva:
+    // prima va osservato il rilascio del pulsante Fire.
+    if (!connected) {
+        setFireRelay(false);
+        fireInputArmed = false;
+        lastFirePressed = false;
+        return;
+    }
+
+    if (!fireInputArmed) {
+        if (!firePressed) {
+            fireInputArmed = true;
+        }
+
+        // Memorizza comunque il livello ricevuto: quando Fire e' tenuto premuto
+        // alla reconnessione non verra' interpretato come fronte di salita.
+        lastFirePressed = firePressed;
+        return;
+    }
+
+    bool newFirePress = firePressed && !lastFirePressed;
     bool cooldownFinished =
         !fireRelayHasShot || millis() - lastFireShotTime >= FIRE_RELAY_COOLDOWN_MS;
 
@@ -108,40 +131,82 @@ static void updateFireRelay(bool firePressed, bool connected) {
         setFireRelay(false);
     }
 
-    lastFirePressed = connected && firePressed;
+    lastFirePressed = firePressed;
 }
 
 // Ferma ogni movimento in caso di timeout UDP.
 // I cingoli dipendono dalla shield; la torretta D2-D5 invece puo' essere fermata sempre.
 static void stopAllMotion() {
-    if (shieldReady) {
-        TrackController_stop();
-    }
-
+    // TrackController_stop() e' innocua prima dell'inizializzazione e va tentata anche
+    // dopo un fault I2C: una PCA9685 che ha conservato l'ultimo PWM puo' essere tornata
+    // raggiungibile per un istante. Il controller limita internamente i retry di brake.
+    TrackController_stop();
     StepperTorretta_stop();
 }
 
-void setup() {
-    Serial.begin(9600);
-    delay(1000);
+// Un NACK o una lettura I2C corta rende il tank disarmato fino a reset.
+// Non tentiamo di riarmare automaticamente una PCA9685 che ha appena segnalato errore.
+static void enterShieldFault() {
+    if (!shieldReady) {
+        return;
+    }
 
-    // Inizializza il relay in stato spento.
+    // Spegni prima le uscite che non dipendono da I2C e tenta l'ultimo brake della
+    // PCA9685 prima di segnare la shield come non utilizzabile.
+    setFireRelay(false);
+    StepperTorretta_stop();
+    TrackController_stop();
+    shieldReady = false;
+
+    if (!shieldFaultReported) {
+        shieldFaultReported = true;
+        Serial.println("ERRORE: comunicazione PCA9685; tank disarmato fino al reset");
+    }
+}
+
+void setup() {
+    // Precarica i latch GPIO nello stato sicuro prima di trasformarli in output.
+    // In questo modo D7 e D2-D5 non attendono Serial o il ritardo di avvio per
+    // ricevere il primo livello definito dal firmware.
+    int inactiveRelayLevel = FIRE_RELAY_ACTIVE_HIGH ? LOW : HIGH;
+    digitalWrite(FIRE_RELAY_PIN, inactiveRelayLevel);
     pinMode(FIRE_RELAY_PIN, OUTPUT);
     setFireRelay(false);
 
-    // La torretta orizzontale usa direttamente le porte digitali D2-D5.
+    digitalWrite(TURRET_DRIVER_A_PIN, LOW);
+    digitalWrite(TURRET_DRIVER_B_PIN, LOW);
+    digitalWrite(TURRET_DRIVER_C_PIN, LOW);
+    digitalWrite(TURRET_DRIVER_D_PIN, LOW);
     StepperTorretta_begin();
 
-    // Inizializza la PCA9685 usata da cingoli e servo elevazione.
+    Serial.begin(9600);
+
+    // Inizializza e frena la PCA9685 prima del ritardo seriale: dopo un reset la
+    // scheda PWM puo' conservare per poco l'ultimo comando ai cingoli.
     Wire.begin();
     shieldReady = configureShieldAddress();
     if (shieldReady) {
         // Avvia PWM, spegne le uscite motore e passa la shield ai moduli.
-        shield.begin();
-        shield.DCbrakeAll();
-        TrackController_begin(shield);
-        ServoTorretta_begin(shield);
+        shieldReady = shield.begin();
+        if (shieldReady) {
+            shield.DCbrakeAll();
+            shieldReady = shield.isCommunicationHealthy();
+        }
+
+        if (shieldReady) {
+            TrackController_begin(shield);
+            ServoTorretta_begin(shield);
+            shieldReady = shield.isCommunicationHealthy();
+        }
+
+        if (!shieldReady) {
+            shieldFaultReported = true;
+            Serial.println("ERRORE: inizializzazione PCA9685 fallita; tank disarmato");
+        }
     }
+
+    // Il ritardo serve solo alla console seriale, non deve ritardare il brake motori.
+    delay(1000);
 
     // Avvia WiFi access point e ricezione UDP.
     UdpReceiver_begin();
@@ -153,33 +218,64 @@ void loop() {
     // Se non arrivano pacchetti, UdpReceiver_update() restituisce valori sicuri centrati.
     TankCommand command = UdpReceiver_update();
 
-    // La torretta orizzontale e' diretta: usa D2-D5, quindi non dipende dalla PCA9685.
-    StepperTorretta_updateJoystick(command.turretX);
-
-    // Cingoli ed elevazione dipendono dalla shield PWM.
-    if (shieldReady) {
-        TrackController_update(command.driveX, command.driveY);
-        ServoTorretta_updateJoystick(command.elevationY);
-    }
-
-    updateFireRelay(command.firePressed, command.connected);
-
-    // In assenza di pacchetti recenti, ferma tutti i motori.
-    // Questo e' il comportamento di sicurezza se il controller si spegne o perde WiFi.
-    if (!command.connected) {
-        stopAllMotion();
-    }
-
-    // Zero azzera la posizione logica della torretta una sola volta per pressione.
-    // Non muove fisicamente la torretta: dice solo al codice "questa posizione ora e' zero".
+    // Il rilascio di Zero deve essere osservato dopo boot o reconnessione prima
+    // di accettare un nuovo fronte di pressione.
     static bool lastZeroPressed = false;
-    if (command.zeroPressed && !lastZeroPressed) {
-        StepperTorretta_setZero();
+    static bool zeroInputArmed = false;
+
+    // Non inviare alcun nuovo comando agli attuatori se il link e' scaduto.
+    // Spegnimento relay e arresto vengono eseguiti prima di ogni altro aggiornamento.
+    if (!command.connected || !shieldReady) {
+        setFireRelay(false);
+        stopAllMotion();
+        updateFireRelay(false, false);
+        lastZeroPressed = false;
+        zeroInputArmed = false;
+
+        if (shieldReady && !shield.isCommunicationHealthy()) {
+            enterShieldFault();
+        }
+    } else {
+        // La torretta orizzontale e' diretta: usa D2-D5, quindi non dipende dalla PCA9685.
+        StepperTorretta_updateJoystick(command.turretX);
+
+        // Cingoli ed elevazione dipendono dalla shield PWM.
         if (shieldReady) {
-            ServoTorretta_setZero();
+            TrackController_update(command.driveX, command.driveY);
+            if (!shield.isCommunicationHealthy()) {
+                enterShieldFault();
+            } else {
+                ServoTorretta_updateJoystick(command.elevationY);
+                if (!shield.isCommunicationHealthy()) {
+                    enterShieldFault();
+                }
+            }
+        }
+
+        // Fire e Zero restano inibiti se una scrittura PWM ha appena fallito.
+        if (shieldReady) {
+            updateFireRelay(command.firePressed, true);
+
+            // Zero azzera la posizione logica della torretta una sola volta per pressione.
+            // Dopo una reconnessione, una pressione gia' mantenuta viene ignorata fino al rilascio.
+            if (!zeroInputArmed) {
+                if (!command.zeroPressed) {
+                    zeroInputArmed = true;
+                }
+                lastZeroPressed = command.zeroPressed;
+            } else {
+                if (command.zeroPressed && !lastZeroPressed) {
+                    StepperTorretta_setZero();
+                    ServoTorretta_setZero();
+                }
+                lastZeroPressed = command.zeroPressed;
+            }
+        } else {
+            updateFireRelay(false, false);
+            lastZeroPressed = false;
+            zeroInputArmed = false;
         }
     }
-    lastZeroPressed = command.zeroPressed;
 
     // Mostra coordinate e stato connessione una volta al secondo.
     static unsigned long lastPrintTime = 0;
@@ -187,7 +283,7 @@ void loop() {
         lastPrintTime = millis();
 
         Serial.print("RX ");
-        Serial.print(command.connected ? "OK" : "TIMEOUT");
+        Serial.print(command.connected && shieldReady ? "OK" : "DISARMED");
         Serial.print(" | drive X=");
         Serial.print(command.driveX);
         Serial.print(" Y=");

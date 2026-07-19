@@ -26,11 +26,13 @@ struct TankCommand {
     bool zeroPressed;
     bool firePressed;
 
-    // true se i pacchetti UDP stanno arrivando entro il timeout.
+    // true solo quando i pacchetti validi sono recenti e il riarmo neutro
+    // e' stato completato. false significa che nessun attuatore va comandato.
     bool connected;
 };
 
-// Avvia access point WiFi dell'Uno R4 e listener UDP.
+// Inizializza AP/UDP in stato disarmato; le attese tra retry non bloccano e
+// i tentativi vengono eseguiti da UdpReceiver_update().
 void UdpReceiver_begin();
 
 // Legge il pacchetto piu' recente o restituisce valori sicuri se scatta il timeout.

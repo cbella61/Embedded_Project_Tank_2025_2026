@@ -56,7 +56,11 @@ class MotorController {
     void setAddress(uint8_t address);
 
     // Avvia la PCA9685 e applica la frequenza configurata.
-    void begin();
+    // false segnala un errore I2C: il chiamante deve entrare in fault sicuro.
+    bool begin();
+
+    // Ritorna false dopo un errore I2C rilevato dal driver PCA9685.
+    bool isCommunicationHealthy() const;
 
     // Pilota una uscita motore della shield con direzione e velocita PWM.
     void DCrun(int motorNumber, int direction, int speed);
@@ -75,6 +79,7 @@ class MotorController {
   private:
     int frequency;
     PWMController pwm;
+    int lastDirection[5] = {0, 0, 0, 0, 0};
 
     // Helper interni: uno per segnali digitali, uno per valori PWM veri.
     void setDigitalChannel(int channel, bool value);

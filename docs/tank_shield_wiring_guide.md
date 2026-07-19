@@ -3,7 +3,7 @@
 Firmware: `Embedded_Project_Tank_2025_2026`  
 Tank: Arduino Uno R4 WiFi + Emakefun PS2X & Motor Drive Board  
 Controller: ESP32 Dev Module  
-Aggiornamento: 13 luglio 2026
+Aggiornamento: 19 luglio 2026
 
 ## 1. Mappa generale
 
@@ -137,64 +137,56 @@ Dopo lo scambio, i comandi logici inviati via UDP sono:
 | `turretX` | GPIO `33` | torretta orizzontale |
 | `elevationY` | GPIO `35` | elevazione servo |
 
-Per invertire soltanto il verso di un asse usa le quattro costanti `DRIVE_X_INVERTED`, `DRIVE_Y_INVERTED`, `TURRET_X_INVERTED` ed `ELEVATION_Y_INVERTED` in `controller-esp32/src/joystickReader.cpp`.
+Per invertire soltanto il verso di un asse usa le quattro costanti `DRIVE_X_INVERTED`, `DRIVE_Y_INVERTED`, `TURRET_X_INVERTED` ed `ELEVATION_Y_INVERTED` in `controller-esp32/src/joystickReader.cpp`. L'orientamento degli assi Joy1 viene corretto solo qui; sul tank restano soltanto le inversioni dei due motori fisici (`LEFT/RIGHT_TRACK_INVERTED`).
 
 ## 7. Calibrazione joystick
 
 All'avvio dell'ESP32:
 
 1. Lascia entrambi i joystick fermi al centro.
-2. Il firmware aspetta `800 ms`.
-3. Legge ogni asse `80` volte e calcola il centro reale.
-4. Rimappa il centro misurato a `512`, mantenendo disponibili gli estremi `0-1023`.
+2. Il firmware aspetta `600 ms`.
+3. Legge ogni asse `80` volte, a distanza di `2 ms`, e calcola il centro reale. La calibrazione completa richiede quindi circa `1,24 s` piu' il piccolo overhead di elaborazione.
+4. Accetta la calibrazione solo se ogni asse e' vicino a `512` (massimo scostamento `70`) e non oscilla oltre `40` punti durante il campionamento.
+5. Rimappa il centro misurato a `512`, mantenendo disponibili gli estremi `0-1023`. Se la calibrazione non e' valida, invia solo il comando sicuro e richiede un riavvio con joystick fermi.
+6. Anche con calibrazione valida, prima di armare i comandi richiede joystick neutrali e pulsanti rilasciati per `400 ms`.
 
-La deadzone del controller e' `80`. Il tank applica anche una deadzone guida di `100`; torretta e servo usano `200`.
+Le deadzone non sono tutte uguali: ogni filtro ha uno scopo diverso.
 
-| Sistema | Centro | Zona ferma approssimativa |
-| --- | --- | --- |
-| Controller ESP32 | `512` | corretta rispetto al centro misurato |
-| Cingoli tank | `512` | circa `412-612` |
-| Torretta e servo | `512` | `312-712` |
+| Filtro | Valore e zona ferma |
+| --- | --- |
+| Joy1 guida sul controller | `DRIVE_INPUT_DEADZONE = 20`: meno di `20` punti dal centro calibrato |
+| Joy2 torretta/elevazione sul controller | `TURRET_INPUT_DEADZONE = 80`: meno di `80` punti dal centro calibrato |
+| Cingoli sul tank | `TRACK_COMMAND_DEADZONE = 100`: meno di `100` punti dal centro UDP, prima e dopo il mixing |
+| Torretta e servo sul tank | `TURRET_JOYSTICK_DEADZONE = 200`: meno di `200` punti dal centro UDP |
 
-Non toccare i joystick durante la calibrazione iniziale.
+La deadzone Joy1 piccola evita di sommare una zona morta eccessiva a quella di protezione del tank. Non toccare i joystick durante la calibrazione iniziale e durante l'attesa di armamento.
 
 ## 8. Guida differenziale e velocita
 
-Joy1 Y controlla avanti/indietro in modo lineare e puo' raggiungere la velocita massima. Joy1 X controlla soltanto la sterzata.
+Joy1 Y controlla avanti/indietro in modo lineare e puo' raggiungere la velocita massima. Joy1 X controlla soltanto la sterzata. Non esistono piu' curve, fasce o soglie intermedie di sterzo.
 
 ```text
-forward = driveY - 512
-turn    = curva(driveX - 512)
-sinistro = forward + turn
-destro   = forward - turn
+forward  = decode(driveY)
+turn     = decode(driveX)
+sinistro = constrain(forward + turn, -512, +512)
+destro   = constrain(forward - turn, -512, +512)
 ```
 
-Curva attuale della sterzata:
-
-| Posizione Joy1 X | Comando massimo di sterzata |
-| --- | --- |
-| dal centro fino a `700` | crescita progressiva fino al `55%` |
-| da `700` a `999` | crescita progressiva dal `55%` al `70%` |
-| da `1000` a `1023` | `100%` |
-
-Le fasce valgono anche nel verso opposto in modo simmetrico rispetto al centro `512`. Il passaggio al `100%` vicino al fondo corsa e' intenzionale.
+`decode()` limita l'ingresso alla scala `0-1023`, sottrae il centro `512` e applica la deadzone del tank. A joystick Y in avanti entrambi i cingoli ricevono lo stesso comando; con Joy1 X un lato accelera e l'altro rallenta. Con il solo Joy1 X, i due cingoli girano in versi opposti e il tank ruota sul posto. Il `constrain()` evita che la somma superi il comando massimo consentito.
 
 Configurazioni principali in `tank/src/trackController.h`:
 
 ```cpp
-#define DRIVE_DEADZONE 100
+#define TRACK_COMMAND_DEADZONE 100
 #define LEFT_TRACK_MIN_PWM 900
 #define RIGHT_TRACK_MIN_PWM 900
-#define TRACK_TURN_MID_JOYSTICK_VALUE 700
-#define TRACK_TURN_MID_SPEED_PERCENT 55
-#define TRACK_TURN_PRE_MAX_JOYSTICK_VALUE 999
-#define TRACK_TURN_PRE_MAX_SPEED_PERCENT 70
-#define TRACK_TURN_FULL_SPEED_JOYSTICK_VALUE 1000
 ```
+
+Quando viene richiesta un'inversione di marcia, ogni cingolo viene prima frenato a PWM zero e riattivato dopo `30 ms` (`TRACK_REVERSE_DEAD_TIME_MS` in `tank/src/trackController.cpp`). La pausa vale anche se il joystick passa brevemente dal centro prima dell'altro verso.
 
 ## 9. Protocollo UDP e frequenza
 
-Il controller invia circa `100 pacchetti al secondo`, uno ogni `10 ms`:
+Il controller invia circa `50 pacchetti al secondo`, uno ogni `20 ms`:
 
 ```text
 V1;driveX;driveY;turretX;elevationY;zero;fire
@@ -206,9 +198,13 @@ Esempio:
 V1;512;900;512;512;0;0
 ```
 
-Il tank conserva l'ultimo comando valido. Se non riceve pacchetti per `500 ms`, centra tutti gli assi, disattiva i pulsanti e ferma i movimenti.
+Il tank conserva l'ultimo comando valido. Se non riceve pacchetti validi per `200 ms`, centra tutti gli assi, disattiva i pulsanti e ferma i movimenti. Alla prima scadenza restituisce il comando sicuro prima di eseguire un nuovo polling `WiFiS3`, cosi' non aggiunge volontariamente un'attesa di rete al normale arresto.
 
-Se l'ESP32 perde `Tank_AP`, non blocca il programma: interrompe l'invio, tenta la riconnessione ogni `3 secondi` e lascia che il tank entri nel timeout di sicurezza. Quando il WiFi torna disponibile, aggiorna l'IP dal gateway, riapre UDP sulla porta `4210` e riprende automaticamente l'invio.
+All'avvio il tank resta disarmato. Se `WiFi.beginAP()` o l'apertura del socket UDP falliscono, non entra in `while(true)`: resta nello stato sicuro e ritenta ogni `3 secondi`. Quando AP e UDP sono pronti, e dopo ogni boot, timeout o guasto rete, il tank richiede `3` pacchetti consecutivi con tutti gli assi entro `+/-20` dal centro e pulsanti rilasciati prima di riarmare gli attuatori.
+
+Se l'ESP32 perde `Tank_AP`, non blocca il programma: interrompe l'invio, tenta la riconnessione ogni `3 secondi` e lascia che il tank entri nel timeout di sicurezza. Quando il WiFi torna disponibile, aggiorna l'IP dal gateway, riapre UDP sulla porta `4210`, richiede di nuovo la neutralita' del controller e riprende automaticamente l'invio solo dopo il riarmo.
+
+L'errore ESP32 `endPacket(): could not send data: 12` e' `ENOMEM`: un buffer della pila WiFi e' temporaneamente esaurito, non e' un overflow della stringa V1. Un errore isolato lascia il socket aperto; dopo `3` fallimenti consecutivi il controller chiude il socket e prova a riaprirlo dopo `200 ms` senza forzare subito una riconnessione WiFi. Il radio sleep e' disabilitato per ridurre la latenza. Se compare insieme a `WiFi perso`, controllare prima alimentazione e disturbi dei motori: il software non puo' eliminare brown-out o EMI.
 
 ## 10. Alimentazione
 
@@ -232,6 +228,10 @@ GND buck -> GND Arduino/shield
 
 Regola e misura l'uscita del buck prima di collegare i servo. Usa la tensione ammessa dai servo, normalmente 5-6 V. Non collegare due alimentazioni diverse allo stesso ramo positivo e non alimentare motori o servo dalla sola USB.
 
+Per il problema WiFi durante la marcia, tenere l'alimentazione della logica/controller separata dal ramo motori quando possibile, con massa comune corretta. Aggiungere vicino alla shield un elettrolitico adeguato (indicativamente 470--1000 uF, tensione e polarita' corrette), ceramici di bypass e condensatori anti-disturbo ai terminali dei motori; intrecciare i fili motore e tenerli lontani dall'antenna ESP32. Prima di aggiungere componenti, verificare corrente e tensione ammesse da batteria, shield e motori.
+
+> Importante: un timeout software non e' un interruttore elettrico. Per garantire l'arresto anche se WiFiS3/I2C si bloccano o l'Uno si resetta, serve un enable/OE/STBY hardware default-off, oppure un E-stop che tolga fisicamente l'abilitazione ai motori e al relay.
+
 ## 11. Dove modificare il comportamento
 
 | Modifica | File | Costante/funzione |
@@ -239,16 +239,23 @@ Regola e misura l'uscita del buck prima di collegare i servo. Usa la tensione am
 | Scambiare X/Y Joy1 | `controller-esp32/src/joystickReader.cpp` | `DRIVE_SWAP_X_Y` |
 | Scambiare X/Y Joy2 | `controller-esp32/src/joystickReader.cpp` | `TURRET_SWAP_X_Y` |
 | Invertire un asse | `controller-esp32/src/joystickReader.cpp` | costanti `*_INVERTED` |
-| Deadzone controller | `controller-esp32/src/joystickReader.cpp` | `CONTROLLER_DEADZONE` |
-| Deadzone cingoli | `tank/src/trackController.h` | `DRIVE_DEADZONE` |
+| Deadzone Joy1 guida | `controller-esp32/src/joystickReader.cpp` | `DRIVE_INPUT_DEADZONE` |
+| Deadzone Joy2 | `controller-esp32/src/joystickReader.cpp` | `TURRET_INPUT_DEADZONE` |
+| Deadzone cingoli | `tank/src/trackController.h` | `TRACK_COMMAND_DEADZONE` |
 | Velocita singolo cingolo | `tank/src/trackController.h` | `LEFT/RIGHT_TRACK_MIN/MAX_PWM`, `LEFT/RIGHT_TRACK_PWM_PERCENT` |
-| Fasce sterzata | `tank/src/trackController.h` | costanti `TRACK_TURN_*` |
+| Pausa prima dell'inversione | `tank/src/trackController.cpp` | `TRACK_REVERSE_DEAD_TIME_MS` |
 | Direzione cingolo | `tank/src/trackController.h` | `LEFT/RIGHT_TRACK_INVERTED` |
 | Velocita torretta | `tank/src/servoTorreta.h` | `TURRET_STEP_INTERVAL_MS` |
 | Limiti elevazione | `tank/src/servoTorreta.cpp` | `ELEVATION_MIN/MAX_ANGLE` |
 | Specchio secondo servo | `tank/src/servoTorreta.cpp` | `ELEVATION_MIRROR_BASE` |
 | Durata impulso relay | `tank/src/main.cpp` | `FIRE_RELAY_PULSE_MS` |
 | Pausa fra colpi | `tank/src/main.cpp` | `FIRE_RELAY_COOLDOWN_MS` |
+| Retry AP/UDP del tank | `tank/src/udpReceiver.cpp` | `NETWORK_RETRY_INTERVAL_MS` |
+| Riarmo UDP del tank | `tank/src/udpReceiver.cpp` | `REARM_NEUTRAL_PACKET_COUNT`, `REARM_NEUTRAL_TOLERANCE` |
+| Timeout senza UDP | `tank/src/udpReceiver.cpp` | `CONNECTION_TIMEOUT_MS` |
+| Frequenza invio UDP | `controller-esp32/src/main.cpp` | `UDP_SEND_INTERVAL_MS` |
+| Recupero `ENOMEM` UDP | `controller-esp32/src/udpSender.cpp` | `UDP_SEND_FAILURE_LIMIT`, `UDP_SOCKET_RECOVERY_INTERVAL_MS` |
+| Refresh I2C cingoli | `tank/src/trackController.h` | `TRACK_COMMAND_REFRESH_INTERVAL_MS` |
 
 ## 12. Schema rapido
 
@@ -261,7 +268,7 @@ ESP32 controller
   GPIO25 <- pulsante zero verso GND
   GPIO26 <- pulsante sparo verso GND
                  |
-                 | WiFi UDP, ogni 10 ms
+                 | WiFi UDP, ogni 20 ms
                  v
 Arduino Uno R4 WiFi + shield
   M3     -> motore DC cingolo sinistro, entrambi i fili
@@ -282,3 +289,5 @@ Arduino Uno R4 WiFi + shield
 - Jumper servo nella posizione coerente: `5V` oppure `EX`.
 - Relay collegato a `COM` e `NO`, non a `NC`.
 - Joystick lasciati al centro durante l'avvio dell'ESP32.
+- Cingoli sollevati per la prima prova di timeout o recupero `ENOMEM`.
+- Misurare l'alimentazione del controller mentre i cingoli partono/invertono; se compare `WiFi perso`, correggere prima il ramo di potenza e il cablaggio.

@@ -13,9 +13,10 @@
  * 4. Se perde il WiFi, continua il loop e tenta automaticamente la riconnessione.
  */
 
-// 10 ms = circa 100 pacchetti al secondo.
-// Abbassare troppo questo valore puo' intasare il WiFi senza migliorare molto.
-#define UDP_SEND_INTERVAL_MS 10
+// 20 ms = circa 50 pacchetti al secondo.
+// E' sufficiente per una guida manuale e riduce la pressione sui buffer WiFi
+// quando il collegamento e' disturbato dai motori.
+#define UDP_SEND_INTERVAL_MS 20
 
 static unsigned long lastUdpSendTime = 0;
 

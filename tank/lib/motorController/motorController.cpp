@@ -15,10 +15,13 @@ void MotorController::setAddress(uint8_t address) {
     pwm = PWMController(address);
 }
 
-void MotorController::begin() {
+bool MotorController::begin() {
     // Avvia il chip PCA9685 e imposta la frequenza condivisa da tutti i canali.
-    pwm.begin();
-    pwm.setPWMFreq(frequency);
+    return pwm.begin() && pwm.setPWMFreq(frequency);
+}
+
+bool MotorController::isCommunicationHealthy() const {
+    return pwm.isCommunicationHealthy();
 }
 
 void MotorController::DCrun(int motorNumber, int direction, int speed) {
@@ -48,9 +51,20 @@ void MotorController::DCrun(int motorNumber, int direction, int speed) {
         return;
     }
 
-    // Prima imposta la velocita, poi il verso.
-    setPwmChannel(speedChannel, constrain(speed, 0, MAX_SPEED));
-    setDigitalChannel(directionChannel, direction == FORWARD);
+    int requestedDirection = direction == FORWARD ? FORWARD : BACKWARD;
+    int requestedSpeed = constrain(speed, 0, MAX_SPEED);
+
+    // Prima di cambiare verso togli PWM: evita di commutare la direzione
+    // mentre il ponte H e' ancora comandato a velocita diversa da zero.
+    if (lastDirection[motorNumber] != 0 && lastDirection[motorNumber] != requestedDirection) {
+        setPwmChannel(speedChannel, 0);
+    }
+
+    // Il verso viene scritto prima della velocita, cosi' una partenza da fermo
+    // non riceve un impulso con la direzione precedente.
+    setDigitalChannel(directionChannel, requestedDirection == FORWARD);
+    setPwmChannel(speedChannel, requestedSpeed);
+    lastDirection[motorNumber] = requestedDirection;
 }
 
 void MotorController::DCbrake(int motorNumber) {
@@ -59,18 +73,22 @@ void MotorController::DCbrake(int motorNumber) {
     case M1:
         setPwmChannel(M1_SPEED_CHANNEL, 0);
         setDigitalChannel(M1_DIRECTION_CHANNEL, false);
+        lastDirection[M1] = 0;
         break;
     case M2:
         setPwmChannel(M2_SPEED_CHANNEL, 0);
         setDigitalChannel(M2_DIRECTION_CHANNEL, false);
+        lastDirection[M2] = 0;
         break;
     case M3:
         setPwmChannel(M3_SPEED_CHANNEL, 0);
         setDigitalChannel(M3_DIRECTION_CHANNEL, false);
+        lastDirection[M3] = 0;
         break;
     case M4:
         setPwmChannel(M4_SPEED_CHANNEL, 0);
         setDigitalChannel(M4_DIRECTION_CHANNEL, false);
+        lastDirection[M4] = 0;
         break;
     }
 }

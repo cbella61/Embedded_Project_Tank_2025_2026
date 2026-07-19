@@ -17,13 +17,17 @@ class PWMController {
     explicit PWMController(uint8_t address = 0x40);
 
     // Avvia I2C e resetta i registri base della PCA9685.
-    void begin();
+    bool begin();
 
     // Imposta la frequenza PWM condivisa da tutti i canali.
-    void setPWMFreq(float frequency);
+    bool setPWMFreq(float frequency);
 
     // Imposta il tempo ON/OFF di un canale PWM (0-15).
-    void setPWM(uint8_t channel, uint16_t on, uint16_t off);
+    bool setPWM(uint8_t channel, uint16_t on, uint16_t off);
+
+    // Resta false dopo un NACK, una lettura corta o un canale non valido.
+    // Il chiamante puo' trasformare questa condizione in un fault sicuro.
+    bool isCommunicationHealthy() const;
 
   private:
     // Registri principali della PCA9685.
@@ -34,10 +38,11 @@ class PWMController {
 
     // Indirizzo I2C reale della PCA9685.
     uint8_t address;
+    bool communicationHealthy = true;
 
     // Lettura/scrittura registro via Wire.
-    uint8_t readRegister(uint8_t registerAddress);
-    void writeRegister(uint8_t registerAddress, uint8_t value);
+    bool readRegister(uint8_t registerAddress, uint8_t& value);
+    bool writeRegister(uint8_t registerAddress, uint8_t value);
 };
 
 #endif
