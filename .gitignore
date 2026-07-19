@@ -8,3 +8,13 @@
 *.pyc
 .codex-remote-attachments/
 tmp/
+
+# Report tecnici locali: sono conservati nella cartella privata sorella del repository
+# e non devono essere riaggiunti al repository per errore.
+docs/audit_firmware_tank_esp32.tex
+docs/code_report.html
+docs/code_report.pdf
+docs/guida_tecnica_firmware_tank_esp32.tex
+output/pdf/audit_firmware_tank_esp32.pdf
+output/pdf/guida_tecnica_firmware_tank_esp32.pdf
+output/pdf/tank_code_report.pdf
