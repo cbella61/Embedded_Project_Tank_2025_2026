@@ -1,22 +1,21 @@
-# TowerPro SG90 - riferimento dimensionale
+# TowerPro SG90 - dimensional reference
 
-Fonte del produttore:
+Manufacturer source:
 
 - https://towerpro.com.tw/product/sg90-analog/
 
-Quote usate dal generatore, in millimetri:
+Dimensions used by the generator, in millimeters:
 
-- corpo lungo Y: 22,7;
-- corpo largo lungo Z quando il servo e coricato: 12,2;
-- profondita del corpo lungo X: 27;
-- ingombro totale corpo e uscita: 30,3;
-- lunghezza complessiva delle alette: 32,3;
-- centro asse a 17 mm dall'estremita posteriore del corpo;
-- sporgenza uscita: 3,3;
-- diametro di riferimento dell'uscita: 6.
+- long body in Y: 22.7;
+- body width along Z when the servo is laid down: 12.2;
+- body depth along X: 27;
+- total body and output footprint: 30.3;
+- total fin length: 32.3;
+- shaft center 17 mm from the rear end of the body;
+- output protrusion: 3.3;
+- reference output diameter: 6.
 
-Nel modello i servo sono coricati e inseriti dall'esterno. Le alette originali
-non vengono usate come unico vincolo: una slitta stampata lascia il loro
-ingombro libero e due barrette removibili M2.5 bloccano il corpo. In questo
-modo non è necessario inventare diametro e posizione dei piccoli fori delle
-alette.
+In the model the servos are laid down and inserted from the outside. The original
+fins are not used as the only constraint: a printed slider leaves their
+clearance free and two removable M2.5 pins lock the body. This avoids having to
+invent the diameter and position of the fin's small holes.
