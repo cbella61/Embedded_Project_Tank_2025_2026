@@ -1,3 +1,18 @@
+/*
+ * TURRET
+ *
+ * This module manages two different movements:
+ *
+ * 1. Horizontal turret:
+ *    - it's a stepper with an external driver
+ *    - driver signals are connected to digital pins D2-D5
+ *    - uses sequence A, B, C, D as in the old working code
+ *
+ * 2. Elevation:
+ *    - uses two servos connected to the shield on S5 and S6
+ *    - the two servos move mirrored to raise/lower together
+ */
+
 #ifndef SERVO_TORRETA_H
 #define SERVO_TORRETA_H
 
@@ -5,66 +20,49 @@
 
 #include "motorController.h"
 
-/*
- * TORRETTA
- *
- * Questo modulo gestisce due movimenti diversi:
- *
- * 1. Torretta orizzontale:
- *    - e' uno stepper con driver esterno
- *    - i segnali del driver sono collegati ai pin digitali D2-D5
- *    - usa la sequenza A, B, C, D come nel vecchio codice che funzionava
- *
- * 2. Elevazione:
- *    - usa due servo collegati alla shield su S5 e S6
- *    - i due servo si muovono specchiati per alzare/abbassare insieme
- */
-
-// ===== CONFIGURAZIONE TORRETTA ORIZZONTALE =====
-
-// Numero di step usato per convertire la posizione logica della torretta in gradi.
+// Number of steps used to convert the turret logical position into degrees.
 #define STEPS_PER_REV 2048
 
-// Mappa fisica: driver torretta A/B/C/D collegato alle porte digitali della shield.
+// Physical map: turret driver A/B/C/D connected to the shield digital pins.
 #define TURRET_DRIVER_A_PIN 2
 #define TURRET_DRIVER_B_PIN 3
 #define TURRET_DRIVER_C_PIN 4
 #define TURRET_DRIVER_D_PIN 5
 
-// Piu' alto significa torretta piu' lenta.
+// Higher means slower turret.
 #define TURRET_STEP_INTERVAL_MS 5
 
-// Valori joystick vicino al centro che non muovono torretta o elevazione.
+// Joystick values near center that do not move turret or elevation.
 #define TURRET_JOYSTICK_DEADZONE 200
 
-// Inizializza lo stepper orizzontale della torretta.
+// Initialize the horizontal turret stepper.
 void StepperTorretta_begin();
 
-// Legge Joy2 X: sotto centro gira a sinistra, sopra centro gira a destra.
+// Read Joy2 X: below center turns left, above center turns right.
 void StepperTorretta_updateJoystick(int joystickValue);
 
-// Azzera solo il conteggio logico, non muove fisicamente il motore.
+// Reset only the logical count, do not physically move the motor.
 void StepperTorretta_setZero();
 
-// Spegne tutti i segnali A/B/C/D del driver.
+// Turn off all driver A/B/C/D signals.
 void StepperTorretta_stop();
 
-// Ritorna l'angolo logico calcolato dagli step fatti.
+// Return the logical angle calculated from the steps made.
 int StepperTorretta_getAngle();
 
-// Inizializza i due servo che alzano e abbassano la torretta.
+// Initialize the two servos that raise and lower the turret.
 void ServoTorretta_begin(MotorController& controller);
 
-// Legge Joy2 Y e cambia gradualmente l'angolo dei servo.
+// Read Joy2 Y and gradually change the servos' angle.
 void ServoTorretta_updateJoystick(int joystickValue);
 
-// Imposta direttamente l'angolo di elevazione, rispettando i limiti.
+// Directly set the elevation angle, respecting limits.
 void ServoTorretta_setAngle(int angle);
 
-// Porta l'elevazione alla posizione logica minima.
+// Set elevation to the logical minimum position.
 void ServoTorretta_setZero();
 
-// Ritorna l'angolo logico attuale dei servo.
+// Return the current logical angle of the servos.
 int ServoTorretta_getAngle();
 
 #endif

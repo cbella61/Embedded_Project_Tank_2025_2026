@@ -1,3 +1,21 @@
+/*
+ * TRACK CONTROL WITH DC MOTORS
+ *
+ * The yellow motors in the photos are 2-wire DC motors, not steppers.
+ * Therefore each track uses a single motor port on the shield:
+ * - left: M3
+ * - right: M1
+ *
+ * M2 is left unused because on the project shield that port tends to spin
+ * even with the joystick at rest.
+ *
+ * Joy1 joystick is converted into differential drive:
+ * - driveY decides forward/backward
+ * - driveX decides steering
+ * - left command = forward + steer
+ * - right command = forward - steer
+ */
+
 #ifndef TRACK_CONTROLLER_H
 #define TRACK_CONTROLLER_H
 
@@ -5,79 +23,59 @@
 
 #include "motorController.h"
 
-/*
- * CONTROLLO CINGOLI CON MOTORI DC
- *
- * I motori gialli in foto sono motori DC a 2 fili, non stepper.
- * Quindi ogni cingolo usa una sola porta motore della shield:
- * - sinistro: M3
- * - destro:   M1
- *
- * M2 viene lasciato libero perche' sulla shield del progetto quella porta
- * tende a girare anche a joystick fermo.
- *
- * Il joystick Joy1 viene trasformato in guida differenziale:
- * - driveY decide avanti/indietro
- * - driveX decide la sterzata
- * - comando sinistro = avanti + sterzo
- * - comando destro   = avanti - sterzo
- */
-
-// ===== CONFIGURAZIONE GUIDA CINGOLI =====
-
-// I joystick arrivano dal controller gia' scalati da 0 a 1023.
-// Il centro ideale e' 512.
+// Joysticks arrive from the controller already scaled 0 to 1023.
+// Ideal center is 512.
 #define DRIVE_JOYSTICK_CENTER 512
 
-// Protezione finale del comando cingolo nella scala UDP 0--1023.
-// Viene applicata sia prima sia dopo il mixing differenziale: non deve coincidere
-// con DRIVE_INPUT_DEADZONE dell'ESP32, che filtra soltanto il rumore del joystick.
-// Se da fermo un lato prova ancora a muoversi, aumenta di 10/20 e riprova sul tank fisico.
+// Final protection for track command in the UDP 0--1023 scale.
+// Applied both before and after differential mixing: it must not match
+// the ESP32 DRIVE_INPUT_DEADZONE, which only filters joystick noise.
+// If one side still tries to move from rest, increase by 10/20 and test on the physical tank.
 #define TRACK_COMMAND_DEADZONE 40
 
-// Ogni cingolo usa una porta motore DC della shield.
-// M2 resta libero: usa M3 per il sinistro e M1 per il destro.
+// Each track uses a DC motor port on the shield.
+// M2 remains free: use M3 for left and M1 for right.
 #define LEFT_TRACK_MOTOR M1
 #define RIGHT_TRACK_MOTOR M3
 
-// PWM minimo e massimo separato per ogni cingolo.
-// I due motori DC non sono mai identici: uno puo' partire prima o girare piu'
-// forte dell'altro anche con lo stesso comando.
+// Separate min and max PWM per track.
+// The two DC motors are never identical: one may start earlier or run faster
+// than the other even with the same command.
 //
-// Come regolare:
-// - un cingolo non parte ai piccoli movimenti: aumenta il suo MIN_PWM di 50;
-// - un cingolo parte troppo presto/strappa: abbassa il suo MIN_PWM di 50;
-// - un cingolo e' piu' veloce dell'altro: abbassa il suo MAX_PWM o PWM_PERCENT.
+// How to adjust:
+// - a track does not start on small movements: increase its MIN_PWM by 50;
+// - a track starts too early/jerks: lower its MIN_PWM by 50;
+// - one track is faster than the other: lower its MAX_PWM or PWM_PERCENT.
 #define LEFT_TRACK_MIN_PWM 900
 #define RIGHT_TRACK_MIN_PWM 900
 #define LEFT_TRACK_MAX_PWM MAX_SPEED
 #define RIGHT_TRACK_MAX_PWM MAX_SPEED
 
-// Trim percentuale finale.
-// 100 = normale, 90 = quel cingolo va al 90%, 110 = quel cingolo spinge di piu'.
-// Se M1/destro corre piu' di M3/sinistro, abbassa RIGHT_TRACK_PWM_PERCENT.
+// Final percentage trim.
+// 100 = normal, 90 = that track runs at 90%, 110 = that track pushes more.
+// If M1/right runs faster than M3/left, lower RIGHT_TRACK_PWM_PERCENT.
 #define LEFT_TRACK_PWM_PERCENT 100
 #define RIGHT_TRACK_PWM_PERCENT 100
 
-// Frequenza massima di refresh I2C quando il comando resta invariato.
-// Un nuovo comando e uno stop di sicurezza non aspettano il periodo successivo.
+// Maximum I2C refresh rate when the command remains unchanged.
+// A new command and a safety stop do not wait for the next period.
 #define TRACK_COMMAND_REFRESH_INTERVAL_MS 20
 
-// Lo sterzo Joy1 X e' lineare: nessuna curva o soglia intermedia nascosta.
-// La sua intensita' entra direttamente nel mixing differenziale sotto.
+// Joy1 X steering is linear: no hidden curve or intermediate threshold.
+// Its magnitude enters directly into the differential mixing below.
 
-// L'orientamento degli assi del joystick viene corretto una sola volta sull'ESP32.
-// Qui restano esclusivamente le inversioni dovute al cablaggio dei due motori.
+// Joystick axis orientation is corrected once on the ESP32.
+// Here remain only inversions due to the motor wiring.
 #define LEFT_TRACK_INVERTED false
 #define RIGHT_TRACK_INVERTED false
 
-// Inizializza i due motori DC dei cingoli sulla shield.
+// Initialize the two DC motors for the tracks on the shield.
 void TrackController_begin(MotorController& controller);
 
-// Applica il mixing differenziale lineare di Joy1 ai due cingoli.
+// Apply linear differential mixing of Joy1 to the two tracks.
 void TrackController_update(int driveX, int driveY);
 
-// Porta entrambi i cingoli a PWM zero tramite DCbrake().
+// Bring both tracks to PWM zero via DCbrake().
 void TrackController_stop();
 
 #endif

@@ -1,22 +1,22 @@
-#include "trackController.h"
-
 /*
- * METODO DI FUNZIONAMENTO DEI CINGOLI DC
+ * DC TRACKS OPERATION METHOD
  *
- * Ogni motore giallo ha solo due fili. La shield gli da:
- * - direzione: avanti o indietro
- * - velocita: PWM dal minimo al massimo configurato per ogni cingolo
+ * Each yellow motor has only two wires. The shield provides:
+ * - direction: forward or backward
+ * - speed: PWM from the configured minimum to maximum per track
  *
- * Il codice non fa piu' fasi stepper. Ora manda semplicemente PWM ai motori
- * M1 e M3, con mixing differenziale per girare come un tank.
+ * The code no longer uses stepper phases. It now simply sends PWM to motors
+ * M1 and M3, with differential mixing to steer like a tank.
  */
+
+#include "trackController.h"
 
 // Puntatore al driver PWM ricevuto dal main in TrackController_begin().
 static MotorController* motorController = nullptr;
 
-// Prima di invertire un cingolo, il firmware applica una breve pausa a PWM zero.
-// Il valore va validato sul driver reale: e' un miglioramento software, non sostituisce
-// il cutoff hardware in caso di blocco del bus I2C.
+// Before reversing a track, firmware applies a short pause at zero PWM.
+// The value must be validated on the real driver: it's a software improvement,
+// not a replacement for a hardware cutoff in case of I2C bus failure.
 #define TRACK_REVERSE_DEAD_TIME_MS 30
 
 // La deadzone deve lasciare almeno un comando positivo e uno negativo disponibili.
@@ -24,10 +24,10 @@ static_assert(TRACK_COMMAND_DEADZONE > 0 && TRACK_COMMAND_DEADZONE < DRIVE_JOYST
               "TRACK_COMMAND_DEADZONE must stay inside the joystick range");
 
 struct TrackMotorState {
-    // Ultimo verso passato a DCRun(). E' una richiesta software, non una misura del motore.
+    // Last direction passed to DCRun(). It's a software request, not a motor measurement.
     int lastRequestedDirection;
-    // Ultimo verso prima di DCbrake(). Resta memorizzato anche se il joystick torna al centro,
-    // cosi' un'inversione immediata rispetta comunque il tempo di pausa.
+    // Last direction before DCbrake(). It remains stored even if the joystick
+    // returns to center, so an immediate reversal still respects the pause time.
     int directionBeforeStop;
     int pendingDirection;
     int pendingSpeed;
@@ -38,9 +38,9 @@ struct TrackMotorState {
 static TrackMotorState leftTrackState = {0, 0, 0, 0, false, 0};
 static TrackMotorState rightTrackState = {0, 0, 0, 0, false, 0};
 
-// Evita di riscrivere continuamente gli stessi quattro registri I2C mentre il
-// joystick resta fermo. Il refresh periodico conserva comunque il controllo di
-// salute della shield; uno stop bypassa questa limitazione.
+// Avoid constantly rewriting the same four I2C registers while the joystick is
+// still. Periodic refresh still preserves the shield health control; a stop
+// bypasses this limitation.
 static int lastDriveX = DRIVE_JOYSTICK_CENTER;
 static int lastDriveY = DRIVE_JOYSTICK_CENTER;
 static bool hasLastDriveCommand = false;
@@ -60,9 +60,9 @@ static TrackMotorState* stateForTrackMotor(int motorNumber) {
     return nullptr;
 }
 
-// Decodifica un asse UDP 0--1023 in un comando firmato centrato su zero.
-// Esempio: 512 diventa 0, 1023 diventa circa +511, 0 diventa -512.
-// L'inversione dell'asse e' responsabilita' del controller ESP32, non del tank.
+// Decode a UDP axis 0--1023 into a signed command centered on zero.
+// Example: 512 becomes 0, 1023 becomes about +511, 0 becomes -512.
+// Axis inversion is the responsibility of the ESP32 controller, not the tank.
 static int decodeDriveAxis(int value) {
     int centered = constrain(value, 0, 1023) - DRIVE_JOYSTICK_CENTER;
 
@@ -75,7 +75,7 @@ static int decodeDriveAxis(int value) {
     return centered;
 }
 
-// Porta un cingolo a PWM zero e annulla un'eventuale inversione in attesa.
+// Bring a track to zero PWM and cancel any pending reversal.
 static void stopTrackMotor(int motorNumber) {
     if (motorController == nullptr) {
         return;
@@ -85,7 +85,8 @@ static void stopTrackMotor(int motorNumber) {
     motorController->DCbrake(motorNumber);
 
     if (state != nullptr) {
-        // Non azzerare directionBeforeStop: serve se dopo il centro viene chiesto il verso opposto.
+            // Do not clear directionBeforeStop: it is used if after center the opposite
+            // direction is requested.
         if (state->lastRequestedDirection != 0) {
             state->directionBeforeStop = state->lastRequestedDirection;
             state->stoppedAt = millis();
@@ -98,7 +99,7 @@ static void stopTrackMotor(int motorNumber) {
     }
 }
 
-// Mappa avanti/indietro in modo lineare: Joy1 Y deve poter arrivare al massimo.
+// Map forward/backward linearly: Joy1 Y must be able to reach maximum.
 static int mapLinearTrackSpeed(int magnitude, int minPwm, int maxPwm) {
     int fullMagnitude = DRIVE_JOYSTICK_CENTER - 1;
     int limitedMagnitude = constrain(magnitude, TRACK_COMMAND_DEADZONE, fullMagnitude);
@@ -106,7 +107,7 @@ static int mapLinearTrackSpeed(int magnitude, int minPwm, int maxPwm) {
     return map(limitedMagnitude, TRACK_COMMAND_DEADZONE, fullMagnitude, minPwm, maxPwm);
 }
 
-// Applica un comando firmato a un cingolo, includendo PWM e pausa sicura di inversione.
+// Apply a signed command to a track, including PWM and safe reversal pause.
 static void applyTrackMotorCommand(int motorNumber, bool inverted, int command, int minPwm,
                                    int maxPwm, int pwmPercent) {
     if (motorController == nullptr) {
@@ -123,8 +124,8 @@ static void applyTrackMotorCommand(int motorNumber, bool inverted, int command, 
     maxPwm = constrain(maxPwm, minPwm, MAX_SPEED);
     pwmPercent = constrain(pwmPercent, 0, 150);
 
-    // Secondo filtro lato tank: il mixing puo' lasciare piccolo un solo cingolo anche
-    // quando forward e turn erano entrambi fuori dalla deadzone individuale.
+    // Second tank-side filter: mixing can leave a single track small even when
+    // forward and turn were both outside their individual deadzones.
     if (abs(command) < TRACK_COMMAND_DEADZONE) {
         stopTrackMotor(motorNumber);
         return;
@@ -132,7 +133,7 @@ static void applyTrackMotorCommand(int motorNumber, bool inverted, int command, 
 
     int magnitude = abs(command);
 
-    // Avanti/indietro e il comando finale dei motori restano lineari.
+    // Forward/backward and the final motor command remain linear.
     int speed = mapLinearTrackSpeed(magnitude, minPwm, maxPwm);
     speed = constrain(static_cast<int>((static_cast<long>(speed) * pwmPercent) / 100), 0, MAX_SPEED);
 
@@ -143,8 +144,8 @@ static void applyTrackMotorCommand(int motorNumber, bool inverted, int command, 
 
     unsigned long now = millis();
 
-    // Durante la pausa di inversione conserva soltanto l'ultimo comando,
-    // senza riaccendere il ponte H prima che il tempo minimo sia trascorso.
+    // During the reversal pause keep only the last command, without re-enabling
+    // the H-bridge before the minimum time has passed.
     if (state->waitingForReverse) {
         state->pendingDirection = direction;
         state->pendingSpeed = speed;
@@ -160,7 +161,7 @@ static void applyTrackMotorCommand(int motorNumber, bool inverted, int command, 
         return;
     }
 
-    // Non invertire direttamente un motore in movimento: frena, attendi e poi riapplica.
+    // Do not invert a running motor directly: brake, wait and then reapply.
     if (state->lastRequestedDirection != 0 && state->lastRequestedDirection != direction) {
         motorController->DCbrake(motorNumber);
         state->directionBeforeStop = state->lastRequestedDirection;
@@ -172,8 +173,8 @@ static void applyTrackMotorCommand(int motorNumber, bool inverted, int command, 
         return;
     }
 
-    // Se e' gia' stato fermato, anche il percorso centro -> verso opposto deve attendere.
-    // Senza questo controllo il vecchio codice poteva bypassare i 30 ms dopo il centro.
+    // If it has already been stopped, the center -> opposite direction path must
+    // also wait. Without this check the old code could bypass the 30 ms after center.
     if (state->lastRequestedDirection == 0 && state->directionBeforeStop != 0 &&
         state->directionBeforeStop != direction &&
         now - state->stoppedAt < TRACK_REVERSE_DEAD_TIME_MS) {
@@ -183,21 +184,21 @@ static void applyTrackMotorCommand(int motorNumber, bool inverted, int command, 
         return;
     }
 
-    // Il comando viene aggiornato a intervalli controllati anche se invariato:
-    // non fare caching permanente, altrimenti un guasto del bus puo' restare
-    // invisibile al controllo di salute della shield.
+    // The command is updated at controlled intervals even if unchanged:
+    // do not perform permanent caching, otherwise a bus failure could remain
+    // invisible to the shield health check.
     motorController->DCrun(motorNumber, direction, speed);
     state->lastRequestedDirection = direction;
     state->directionBeforeStop = direction;
 }
 
 void TrackController_begin(MotorController& controller) {
-    // Salva il riferimento alla shield inizializzata dal main.
+    // Store the reference to the shield initialized by main.
     motorController = &controller;
     hasLastDriveCommand = false;
     stopCommandIssued = false;
 
-    // Parte sempre con entrambi i cingoli spenti.
+    // Always start with both tracks stopped.
     TrackController_stop();
 }
 
@@ -218,14 +219,14 @@ void TrackController_update(int driveX, int driveY) {
     lastTrackCommandTime = now;
     stopCommandIssued = false;
 
-    // Joy1 Y: avanti/indietro. Joy1 X: sterzata.
+    // Joy1 Y: forward/backward. Joy1 X: steering.
     int forward = decodeDriveAxis(driveY);
     int turn = decodeDriveAxis(driveX);
 
-    // Mixing differenziale:
-    // - avanti dritto: entrambi i motori girano uguali
-    // - sterzata: un lato accelera e l'altro rallenta
-    // - solo X: un motore avanti e uno indietro, quindi ruota sul posto
+    // Differential mixing:
+    // - straight forward: both motors run the same
+    // - steering: one side speeds up and the other slows down
+    // - only X: one motor forward and one backward, so it spins in place
     int leftCommand = constrain(forward + turn, -DRIVE_JOYSTICK_CENTER, DRIVE_JOYSTICK_CENTER);
     int rightCommand = constrain(forward - turn, -DRIVE_JOYSTICK_CENTER, DRIVE_JOYSTICK_CENTER);
 

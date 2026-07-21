@@ -1,3 +1,20 @@
+/*
+ * TANK MAIN
+ *
+ * This file does not directly perform all movements: it coordinates modules.
+ *
+ * Operation method:
+ * 1. In setup() initialize the relay, turret, PCA9685 shield and UDP receiver.
+ * 2. In loop() read the last command received from the ESP32 controller.
+ * 3. Dispatch each part of the command to the appropriate module:
+ *    - driveX/driveY     -> differential tracks
+ *    - turretX           -> horizontal turret D2-D5
+ *    - elevationY        -> servos S5/S6
+ *    - firePressed       -> relay D7
+ *    - zeroPressed       -> logical zeroing
+ * 4. If the controller stops sending packets for too long, stop the motors.
+ */
+
 #include <Arduino.h>
 #include <Wire.h>
 
@@ -6,44 +23,27 @@
 #include "trackController.h"
 #include "udpReceiver.h"
 
-/*
- * MAIN DEL TANK
- *
- * Questo file non fa direttamente tutti i movimenti: coordina i moduli.
- *
- * Metodo di funzionamento:
- * 1. In setup() inizializza relay, torretta, shield PCA9685 e ricevitore UDP.
- * 2. In loop() legge l'ultimo comando arrivato dal controller ESP32.
- * 3. Passa ogni parte del comando al modulo giusto:
- *    - driveX/driveY     -> cingoli differenziali
- *    - turretX           -> torretta orizzontale D2-D5
- *    - elevationY        -> servo S5/S6
- *    - firePressed       -> relay D7
- *    - zeroPressed       -> azzeramento logico
- * 4. Se il controller non manda pacchetti per troppo tempo, ferma i motori.
- */
-
-// ===== CONFIGURAZIONE RELAY SPARO =====
-
-// Pin digitale collegato al modulo relay.
+// Digital pin connected to the relay module.
 #define FIRE_RELAY_PIN 7
 
-// true: relay acceso con HIGH. false: relay acceso con LOW.
+#define FIRE_RELAY_PIN 7
+
+// true: relay active with HIGH. false: relay active with LOW.
 #define FIRE_RELAY_ACTIVE_HIGH true
 
-// Durata dell'impulso di sparo: il relay non resta acceso fisso.
+// Duration of the fire pulse: the relay is not kept continuously on.
 #define FIRE_RELAY_PULSE_MS 200
 
-// Tempo minimo tra un colpo e quello successivo.
+// Minimum time between one shot and the next.
 #define FIRE_RELAY_COOLDOWN_MS 12000
 
-// ===== MONITOR SERIALE =====
+// ===== SERIAL MONITOR =====
 
-// Stampa le coordinate una volta al secondo per non riempire la console.
+// Print coordinates once per second to avoid filling the console.
 #define COORDINATE_PRINT_INTERVAL_MS 1000
 
-// Shield PCA9685 condivisa da cingoli e servo di elevazione.
-// La frequenza e' 50 Hz perche' e' compatibile con i servo.
+// Shared PCA9685 shield between the tracks and elevation servo.
+// Frequency is 50 Hz because it is compatible with servos.
 static MotorController shield(50);
 
 // Diventa true solo se la PCA9685 viene trovata su I2C.
@@ -56,14 +56,14 @@ static unsigned long fireRelayStartTime = 0;
 static unsigned long lastFireShotTime = 0;
 static bool fireRelayHasShot = false;
 
-// Verifica se un dispositivo risponde a un indirizzo I2C.
+// Check whether a device responds at an I2C address.
 static bool i2cDevicePresent(uint8_t address) {
     Wire.beginTransmission(address);
     return Wire.endTransmission() == 0;
 }
 
-// Seleziona automaticamente l'indirizzo della PCA9685 della shield.
-// Alcune shield usano indirizzi diversi, quindi il codice prova i piu' comuni.
+// Automatically select the PCA9685 address on the shield.
+// Some shields use different addresses, so the code tries common ones.
 static bool configureShieldAddress() {
     static const uint8_t candidateAddresses[] = {0x60, 0x40, 0x7F};
 
@@ -76,11 +76,11 @@ static bool configureShieldAddress() {
         }
     }
 
-    Serial.println("ERRORE: PCA9685 shield non rilevata");
+    Serial.println("ERROR: PCA9685 shield not detected");
     return false;
 }
 
-// Imposta il livello elettrico corretto per il relay sparo.
+// Set the correct electrical level for the fire relay.
 static void setFireRelay(bool active) {
     int level =
         active ? (FIRE_RELAY_ACTIVE_HIGH ? HIGH : LOW) : (FIRE_RELAY_ACTIVE_HIGH ? LOW : HIGH);
@@ -89,15 +89,15 @@ static void setFireRelay(bool active) {
     fireRelayActive = active;
 }
 
-// Genera un solo impulso di sparo per ogni pressione del pulsante.
-// Usa il fronte di salita e poi aspetta 12 secondi prima di accettare un altro colpo.
+// Generate a single fire pulse for each button press.
+// Uses the rising edge and then waits 12 seconds before accepting another shot.
 static void updateFireRelay(bool firePressed, bool connected) {
     static bool lastFirePressed = false;
     static bool fireInputArmed = false;
 
-    // Dopo timeout o perdita del collegamento il relay deve spegnersi subito.
-    // Il successivo collegamento non puo' riutilizzare una pressione rimasta attiva:
-    // prima va osservato il rilascio del pulsante Fire.
+    // After timeout or loss of connection the relay must turn off immediately.
+    // A subsequent connection cannot reuse a button press that remained active:
+    // first observe the release of the Fire button.
     if (!connected) {
         setFireRelay(false);
         fireInputArmed = false;
@@ -110,8 +110,8 @@ static void updateFireRelay(bool firePressed, bool connected) {
             fireInputArmed = true;
         }
 
-        // Memorizza comunque il livello ricevuto: quando Fire e' tenuto premuto
-        // alla reconnessione non verra' interpretato come fronte di salita.
+        // Still record the received level: when Fire is held down
+        // during reconnection it will not be interpreted as a rising edge.
         lastFirePressed = firePressed;
         return;
     }
@@ -134,8 +134,8 @@ static void updateFireRelay(bool firePressed, bool connected) {
     lastFirePressed = firePressed;
 }
 
-// Ferma ogni movimento in caso di timeout UDP.
-// I cingoli dipendono dalla shield; la torretta D2-D5 invece puo' essere fermata sempre.
+// Stop all motion in case of UDP timeout.
+// Tracks depend on the shield; the turret (D2-D5) can be stopped at any time.
 static void stopAllMotion() {
     // TrackController_stop() e' innocua prima dell'inizializzazione e va tentata anche
     // dopo un fault I2C: una PCA9685 che ha conservato l'ultimo PWM puo' essere tornata
@@ -144,8 +144,8 @@ static void stopAllMotion() {
     StepperTorretta_stop();
 }
 
-// Un NACK o una lettura I2C corta rende il tank disarmato fino a reset.
-// Non tentiamo di riarmare automaticamente una PCA9685 che ha appena segnalato errore.
+// A NACK or a short I2C read makes the tank disarmed until reset.
+// Do not attempt to automatically rearm a PCA9685 that has just reported an error.
 static void enterShieldFault() {
     if (!shieldReady) {
         return;
@@ -160,14 +160,14 @@ static void enterShieldFault() {
 
     if (!shieldFaultReported) {
         shieldFaultReported = true;
-        Serial.println("ERRORE: comunicazione PCA9685; tank disarmato fino al reset");
+        Serial.println("ERROR: PCA9685 communication; tank disarmed until reset");
     }
 }
 
 void setup() {
-    // Precarica i latch GPIO nello stato sicuro prima di trasformarli in output.
-    // In questo modo D7 e D2-D5 non attendono Serial o il ritardo di avvio per
-    // ricevere il primo livello definito dal firmware.
+    // Preload the GPIO latches in a safe state before making them outputs.
+    // This way D7 and D2-D5 do not wait for Serial or boot delay to receive the
+    // first level defined by the firmware.
     int inactiveRelayLevel = FIRE_RELAY_ACTIVE_HIGH ? LOW : HIGH;
     digitalWrite(FIRE_RELAY_PIN, inactiveRelayLevel);
     pinMode(FIRE_RELAY_PIN, OUTPUT);
@@ -181,8 +181,8 @@ void setup() {
 
     Serial.begin(9600);
 
-    // Inizializza e frena la PCA9685 prima del ritardo seriale: dopo un reset la
-    // scheda PWM puo' conservare per poco l'ultimo comando ai cingoli.
+    // Initialize and brake the PCA9685 before the serial delay: after a reset
+    // the PWM board can briefly retain the last command to the tracks.
     Wire.begin();
     shieldReady = configureShieldAddress();
     if (shieldReady) {
@@ -201,16 +201,16 @@ void setup() {
 
         if (!shieldReady) {
             shieldFaultReported = true;
-            Serial.println("ERRORE: inizializzazione PCA9685 fallita; tank disarmato");
+                    Serial.println("ERROR: PCA9685 initialization failed; tank disarmed");
         }
     }
 
-    // Il ritardo serve solo alla console seriale, non deve ritardare il brake motori.
+    // The delay is only for the serial console; it should not delay motor braking.
     delay(1000);
 
-    // Avvia WiFi access point e ricezione UDP.
+    // Start WiFi access point and UDP reception.
     UdpReceiver_begin();
-    Serial.println("Tank pronto");
+    Serial.println("Tank ready");
 }
 
 void loop() {
@@ -218,8 +218,8 @@ void loop() {
     // Se non arrivano pacchetti, UdpReceiver_update() restituisce valori sicuri centrati.
     TankCommand command = UdpReceiver_update();
 
-    // Il rilascio di Zero deve essere osservato dopo boot o reconnessione prima
-    // di accettare un nuovo fronte di pressione.
+    // The release of Zero must be observed after boot or reconnection before
+    // accepting a new press event.
     static bool lastZeroPressed = false;
     static bool zeroInputArmed = false;
 
@@ -236,14 +236,13 @@ void loop() {
             enterShieldFault();
         }
     } else {
-        // La torretta orizzontale e' diretta: usa D2-D5, quindi non dipende dalla PCA9685.
+        // The horizontal turret is direct: uses D2-D5, so it does not depend on the PCA9685.
         StepperTorretta_updateJoystick(command.turretX);
-
-        // Cingoli ed elevazione dipendono dalla shield PWM.
-        if (shieldReady) {
-            TrackController_update(command.driveX, command.driveY);
-            if (!shield.isCommunicationHealthy()) {
-                enterShieldFault();
+        // Tracks and elevation depend on the PWM shield.
+        if (!shieldReady) {
+            shieldFaultReported = true;
+            Serial.println("ERROR: PCA9685 communication; tank disarmed until reset");
+        }
             } else {
                 ServoTorretta_updateJoystick(command.elevationY);
                 if (!shield.isCommunicationHealthy()) {
@@ -256,8 +255,8 @@ void loop() {
         if (shieldReady) {
             updateFireRelay(command.firePressed, true);
 
-            // Zero azzera la posizione logica della torretta una sola volta per pressione.
-            // Dopo una reconnessione, una pressione gia' mantenuta viene ignorata fino al rilascio.
+            // Zero resets the turret logical position once per press.
+            // After a reconnection, a press that is already held is ignored until release.
             if (!zeroInputArmed) {
                 if (!command.zeroPressed) {
                     zeroInputArmed = true;
@@ -297,8 +296,8 @@ void loop() {
         Serial.print(" servo=");
         Serial.print(ServoTorretta_getAngle());
         Serial.print("deg | zero=");
-        Serial.print(command.zeroPressed ? "PREMUTO" : "off");
+           Serial.print(command.zeroPressed ? "PRESSED" : "off");
         Serial.print(" fire=");
-        Serial.println(command.firePressed ? "PREMUTO" : "off");
+           Serial.println(command.firePressed ? "PRESSED" : "off");
     }
 }

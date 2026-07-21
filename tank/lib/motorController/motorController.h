@@ -1,26 +1,27 @@
-#ifndef MOTOR_CONTROLLER_H
+/*
+ * SHIELD MOTOR CONTROLLER
+ *
+ * This wrapper makes it easier to use the shield:
+ * - DC motor commands: M1, M2, M3, M4
+ * - servo commands: S1-S8
+ *
+ * Internally the shield uses a PCA9685. Each motor output has a channel for
+ * direction and a channel for PWM speed.
+ */
+
+ #ifndef MOTOR_CONTROLLER_H
 #define MOTOR_CONTROLLER_H
 
 #include "PWMController.h"
 
-/*
- * MOTOR CONTROLLER DELLA SHIELD
- *
- * Questo wrapper rende piu' semplice usare la shield:
- * - comandi motore DC: M1, M2, M3, M4
- * - comandi servo: S1-S8
- *
- * Internamente la shield usa una PCA9685. Ogni uscita motore ha un canale per
- * direzione e un canale per velocita PWM.
- */
 
-// Uscite motore della shield. Uno stepper bipolare dei cingoli usa due uscite.
 #define M1 1
 #define M2 2
 #define M3 3
 #define M4 4
 
-// Canali PCA9685 collegati internamente ai driver motore TB6612.
+// Motor outputs on the shield. A bipolar stepper for the tracks uses two outputs.
+// (Note: the #defines above remain for pin/channel mapping.)
 #define M1_DIRECTION_CHANNEL 10
 #define M1_SPEED_CHANNEL 8
 #define M2_DIRECTION_CHANNEL 11
@@ -30,14 +31,14 @@
 #define M4_DIRECTION_CHANNEL 5
 #define M4_SPEED_CHANNEL 7
 
-// Direzioni accettate da DCrun().
+// PCA9685 channels internally connected to the TB6612 motor drivers.
 #define FORWARD 1
 #define BACKWARD 2
 
-// La PCA9685 ha risoluzione PWM a 12 bit: 0-4096.
+// Directions accepted by DCrun().
 #define MAX_SPEED 4096
 
-// Canali dei connettori servo verificati sulla shield usata in questo progetto.
+// Verified servo connector channels on the shield used in this project.
 #define S1 0
 #define S2 1
 #define S3 3
@@ -49,31 +50,31 @@
 
 class MotorController {
   public:
-    // La frequenza deve restare a 50 Hz perche' la stessa PCA9685 pilota i servo.
+    // Frequency must remain 50 Hz because the same PCA9685 drives the servos.
     explicit MotorController(int frequency, uint8_t address = 0x60);
 
-    // Seleziona l'indirizzo I2C della PCA9685 prima di begin().
+    // Select the PCA9685 I2C address before begin().
     void setAddress(uint8_t address);
 
-    // Avvia la PCA9685 e applica la frequenza configurata.
-    // false segnala un errore I2C: il chiamante deve entrare in fault sicuro.
+    // Start the PCA9685 and apply the configured frequency.
+    // false signals an I2C error: the caller must enter a safe fault state.
     bool begin();
 
-    // Ritorna false dopo un errore I2C rilevato dal driver PCA9685.
+    // Returns false after an I2C error detected by the PCA9685 driver.
     bool isCommunicationHealthy() const;
 
-    // Pilota una uscita motore della shield con direzione e velocita PWM.
+    // Drive a shield motor output with direction and PWM speed.
     void DCrun(int motorNumber, int direction, int speed);
 
-    // Ferma una o tutte le uscite motore della shield.
+    // Stop one or all motor outputs of the shield.
     void DCbrake(int motorNumber);
     void DCbrakeAll();
     void bipolarStepperStop(int motorA, int motorB);
 
-    // Manda un comando servo standard 0-180 gradi a un canale servo.
+    // Send a standard 0-180 degree servo command to a servo channel.
     void servoTurn(int servoNumber, int degree);
 
-    // Comanda due servo collegati, con il secondo specchiato attorno a un angolo base.
+    // Command two linked servos, with the second mirrored around a base angle.
     void servoPairTurn(int servoA, int servoB, int degree, int invertedDegreeBase);
 
   private:
@@ -81,7 +82,7 @@ class MotorController {
     PWMController pwm;
     int lastDirection[5] = {0, 0, 0, 0, 0};
 
-    // Helper interni: uno per segnali digitali, uno per valori PWM veri.
+    // Internal helpers: one for digital signals, one for real PWM values.
     void setDigitalChannel(int channel, bool value);
     void setPwmChannel(int channel, int value);
 };

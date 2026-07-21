@@ -5,17 +5,17 @@
 PWMController::PWMController(uint8_t address) : address(address) {}
 
 bool PWMController::begin() {
-    // Avvia il bus I2C usato per parlare con la PCA9685.
+    // Start the I2C bus used to talk to the PCA9685.
     Wire.begin();
     communicationHealthy = true;
 
-    // MODE1 a 0 resetta il funzionamento base.
+    // MODE1 = 0 resets basic operation.
     if (!writeRegister(MODE1_REGISTER, 0x00)) {
         return false;
     }
 
-    // MODE2 = 0x04 abilita uscite totem-pole/push-pull:
-    // il segnale HIGH e' guidato davvero e non resta flottante.
+    // MODE2 = 0x04 enables totem-pole / push-pull outputs:
+    // a HIGH signal is actively driven and not left floating.
     return writeRegister(MODE2_REGISTER, 0x04);
 }
 
@@ -25,10 +25,10 @@ bool PWMController::setPWMFreq(float frequency) {
         return false;
     }
 
-    // Per cambiare frequenza la PCA9685 deve entrare in sleep mode.
+    // To change frequency the PCA9685 must enter sleep mode.
     float correctedFrequency = frequency * 0.98f;
 
-    // Formula dal datasheet: prescale = clock / (4096 * freq) - 1.
+    // Datasheet formula: prescale = clock / (4096 * freq) - 1.
     float prescaleValue = (25000000.0f / (4096.0f * correctedFrequency)) - 1.0f;
     uint8_t prescale = static_cast<uint8_t>(floor(prescaleValue + 0.5f));
 
@@ -53,7 +53,7 @@ bool PWMController::setPWM(uint8_t channel, uint16_t on, uint16_t off) {
         return false;
     }
 
-    // Ogni canale PCA9685 ha 4 registri consecutivi:
+    // Each PCA9685 channel has 4 consecutive registers:
     // ON_L, ON_H, OFF_L, OFF_H.
     Wire.beginTransmission(address);
     Wire.write(LED0_ON_L_REGISTER + (4 * channel));
@@ -70,7 +70,7 @@ bool PWMController::setPWM(uint8_t channel, uint16_t on, uint16_t off) {
 }
 
 bool PWMController::readRegister(uint8_t registerAddress, uint8_t& value) {
-    // Prima seleziona il registro da leggere.
+    // First select the register to read.
     Wire.beginTransmission(address);
     Wire.write(registerAddress);
     if (Wire.endTransmission() != 0) {
@@ -78,7 +78,7 @@ bool PWMController::readRegister(uint8_t registerAddress, uint8_t& value) {
         return false;
     }
 
-    // Poi richiede un byte dalla PCA9685.
+    // Then request one byte from the PCA9685.
     if (Wire.requestFrom(address, static_cast<uint8_t>(1)) != 1 || !Wire.available()) {
         communicationHealthy = false;
         return false;
@@ -89,7 +89,7 @@ bool PWMController::readRegister(uint8_t registerAddress, uint8_t& value) {
 }
 
 bool PWMController::writeRegister(uint8_t registerAddress, uint8_t value) {
-    // Scrittura base di un registro PCA9685.
+    // Basic write of a PCA9685 register.
     Wire.beginTransmission(address);
     Wire.write(registerAddress);
     Wire.write(value);

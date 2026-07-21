@@ -1,38 +1,37 @@
+/*
+ * TANK UDP RECEIVER
+ *
+ * This module creates the tank WiFi network and reads commands from the controller.
+ * The main should not need to know how WiFi/UDP works: it only receives a ready-to-use TankCommand.
+ */
+
 #ifndef UDP_RECEIVER_H
 #define UDP_RECEIVER_H
 
 #include <Arduino.h>
 
-/*
- * RICEVITORE UDP DEL TANK
- *
- * Questo modulo crea la rete WiFi del tank e legge i comandi del controller.
- * Il main non deve sapere come funziona WiFi/UDP: riceve solo un TankCommand
- * gia' pronto da usare.
- */
-
-// Comando completo ricevuto dal controller ESP32.
-// Tutti gli assi sono in scala 0-1023, con centro a circa 512.
+// Full command received from the ESP32 controller.
+// All axes are in the 0-1023 scale, with center around 512.
 struct TankCommand {
-    // Joy1: guida differenziale.
+    // Joy1: differential drive.
     int driveX;
     int driveY;
 
-    // Joy2: torretta orizzontale ed elevazione.
+    // Joy2: horizontal turret and elevation.
     int turretX;
     int elevationY;
 
-    // Pulsanti.
+    // Buttons.
     bool zeroPressed;
     bool firePressed;
 
-    // true solo quando i pacchetti validi sono recenti e il riarmo neutro
-    // e' stato completato. false significa che nessun attuatore va comandato.
+    // true only when valid packets are recent and neutral rearm has been completed.
+    // false means no actuator should be commanded.
     bool connected;
 };
 
-// Inizializza AP/UDP in stato disarmato; le attese tra retry non bloccano e
-// i tentativi vengono eseguiti da UdpReceiver_update().
+// Initialize AP/UDP in disarmed state; retry waits are non-blocking and
+// attempts are performed by UdpReceiver_update().
 void UdpReceiver_begin();
 
 // Legge il pacchetto piu' recente o restituisce valori sicuri se scatta il timeout.

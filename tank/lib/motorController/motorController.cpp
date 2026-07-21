@@ -1,8 +1,8 @@
 #include "motorController.h"
 
 namespace {
-// Limiti sicuri del pulse servo sulla PCA9685 a 50 Hz.
-// Evitiamo impulsi troppo estremi per non mandare i servo oltre il fine corsa.
+// Safe servo pulse limits for PCA9685 at 50 Hz.
+// Avoid overly extreme pulses to prevent driving servos beyond end stops.
 const int SERVO_MIN_PULSE = 110;
 const int SERVO_MAX_PULSE = 500;
 } // namespace
@@ -11,12 +11,12 @@ MotorController::MotorController(int frequency, uint8_t address)
     : frequency(frequency), pwm(address) {}
 
 void MotorController::setAddress(uint8_t address) {
-    // Ricrea il driver PWM con l'indirizzo I2C trovato dal main.
+    // Recreate the PWM driver with the I2C address found by main.
     pwm = PWMController(address);
 }
 
 bool MotorController::begin() {
-    // Avvia il chip PCA9685 e imposta la frequenza condivisa da tutti i canali.
+    // Initialize the PCA9685 chip and set the frequency shared by all channels.
     return pwm.begin() && pwm.setPWMFreq(frequency);
 }
 
@@ -28,8 +28,8 @@ void MotorController::DCrun(int motorNumber, int direction, int speed) {
     int directionChannel = -1;
     int speedChannel = -1;
 
-    // Ogni M della shield corrisponde a due canali PCA9685:
-    // uno decide la direzione, l'altro decide la velocita PWM.
+    // Each M port on the shield corresponds to two PCA9685 channels:
+    // one selects direction, the other controls PWM speed.
     switch (motorNumber) {
     case M1:
         directionChannel = M1_DIRECTION_CHANNEL;
@@ -54,21 +54,21 @@ void MotorController::DCrun(int motorNumber, int direction, int speed) {
     int requestedDirection = direction == FORWARD ? FORWARD : BACKWARD;
     int requestedSpeed = constrain(speed, 0, MAX_SPEED);
 
-    // Prima di cambiare verso togli PWM: evita di commutare la direzione
-    // mentre il ponte H e' ancora comandato a velocita diversa da zero.
+    // Before changing direction remove PWM: avoid switching direction while the
+    // H-bridge is still commanded at non-zero speed.
     if (lastDirection[motorNumber] != 0 && lastDirection[motorNumber] != requestedDirection) {
         setPwmChannel(speedChannel, 0);
     }
 
-    // Il verso viene scritto prima della velocita, cosi' una partenza da fermo
-    // non riceve un impulso con la direzione precedente.
+    // Direction is written before speed so a start from standstill does not
+    // receive a pulse with the previous direction.
     setDigitalChannel(directionChannel, requestedDirection == FORWARD);
     setPwmChannel(speedChannel, requestedSpeed);
     lastDirection[motorNumber] = requestedDirection;
 }
 
 void MotorController::DCbrake(int motorNumber) {
-    // Spegne velocita PWM e porta bassa la direzione del motore scelto.
+    // Turn off PWM speed and drive the motor direction low for the chosen motor.
     switch (motorNumber) {
     case M1:
         setPwmChannel(M1_SPEED_CHANNEL, 0);
@@ -94,7 +94,7 @@ void MotorController::DCbrake(int motorNumber) {
 }
 
 void MotorController::DCbrakeAll() {
-    // Usato all'avvio e nei casi di sicurezza.
+    // Used at startup and for safety cases.
     DCbrake(M1);
     DCbrake(M2);
     DCbrake(M3);
@@ -102,23 +102,23 @@ void MotorController::DCbrakeAll() {
 }
 
 void MotorController::bipolarStepperStop(int motorA, int motorB) {
-    // Uno stepper bipolare usa due uscite motore: spegniamo entrambe.
+    // A bipolar stepper uses two motor outputs: turn both off.
     DCbrake(motorA);
     DCbrake(motorB);
 }
 
 void MotorController::servoTurn(int servoNumber, int degree) {
-    // Converte i gradi del servo nel valore PWM PCA9685.
+    // Convert servo degrees into a PCA9685 PWM value.
     int constrainedDegree = constrain(degree, 0, 180);
     int pulse = map(constrainedDegree, 0, 180, SERVO_MIN_PULSE, SERVO_MAX_PULSE);
     setPwmChannel(servoNumber, pulse);
 }
 
 void MotorController::servoPairTurn(int servoA, int servoB, int degree, int invertedDegreeBase) {
-    // Il primo servo segue l'angolo normale.
+    // The first servo follows the normal angle.
     int firstAngle = constrain(degree, 0, 180);
 
-    // Il secondo servo si muove al contrario rispetto al primo.
+    // The second servo moves mirrored relative to the first.
     int secondAngle = constrain(invertedDegreeBase - firstAngle, 0, 180);
 
     servoTurn(servoA, firstAngle);
@@ -126,21 +126,21 @@ void MotorController::servoPairTurn(int servoA, int servoB, int degree, int inve
 }
 
 void MotorController::setDigitalChannel(int channel, bool value) {
-    // Per forzare LOW sulla PCA9685 serve il bit full-off.
-    // Per forzare HIGH serve il bit full-on.
+    // To force LOW on the PCA9685 use the full-off bit.
+    // To force HIGH use the full-on bit.
     pwm.setPWM(channel, value ? 4096 : 0, value ? 0 : 4096);
 }
 
 void MotorController::setPwmChannel(int channel, int value) {
-    // value <= 0 spegne completamente il canale.
+    // value <= 0 completely turns the channel off.
     if (value <= 0) {
         pwm.setPWM(channel, 0, 4096);
     }
-    // value >= 4096 accende completamente il canale.
+    // value >= 4096 fully turns the channel on.
     else if (value >= MAX_SPEED) {
         pwm.setPWM(channel, 4096, 0);
     }
-    // Altrimenti genera PWM normale da 0 fino al valore richiesto.
+    // Otherwise generate normal PWM from 0 up to the requested value.
     else {
         pwm.setPWM(channel, 0, value);
     }

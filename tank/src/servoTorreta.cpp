@@ -1,59 +1,57 @@
-#include "servoTorreta.h"
-
 /*
- * METODO DI FUNZIONAMENTO DELLA TORRETTA
+ * TURRET OPERATION METHOD
  *
- * Torretta orizzontale:
- * - il driver esterno riceve quattro segnali: A, B, C, D
- * - ad ogni step accendiamo una sola uscita alla volta
- * - la sequenza in avanti e': A -> B -> C -> D -> A
- * - la sequenza indietro e': D -> C -> B -> A -> D
+ * Horizontal turret:
+ * - the external driver receives four signals: A, B, C, D
+ * - on each step we energize a single output at a time
+ * - forward sequence: A -> B -> C -> D -> A
+ * - backward sequence: D -> C -> B -> A -> D
  *
- * Elevazione:
- * - i due servo sono collegati alla PCA9685 della shield su S5 e S6
- * - il primo servo riceve l'angolo normale
- * - il secondo servo riceve un angolo specchiato: ELEVATION_MIRROR_BASE - angolo
+ * Elevation:
+ * - the two servos are connected to the shield PCA9685 on S5 and S6
+ * - the first servo receives the normal angle
+ * - the second servo receives a mirrored angle: ELEVATION_MIRROR_BASE - angle
  */
 
-// ===== LIMITI MECCANICI =====
+#include "servoTorreta.h"
 
-// La torretta orizzontale si ferma a mezzo giro per lato.
+// The horizontal turret stops at half a revolution per side.
 #define TURRET_MIN_ANGLE -180
 #define TURRET_MAX_ANGLE 180
 
-// I due servo di elevazione non devono superare questo intervallo meccanico.
-// Range richiesto per la torretta: 0 gradi = basso, 47 gradi = alto.
+// The two elevation servos must not exceed this mechanical range.
+// Required range for the turret: 0 degrees = low, 47 degrees = high.
 #define ELEVATION_MIN_ANGLE 0
 #define ELEVATION_MAX_ANGLE 47
 #define ELEVATION_MIRROR_BASE 90
 #define ELEVATION_SERVO_A S5
 #define ELEVATION_SERVO_B S6
 
-// Centro logico dei joystick dopo conversione 0-1023.
+// Logical center of joysticks after conversion 0-1023.
 #define JOYSTICK_CENTER 512
 
-// I servo vengono aggiornati piu' lentamente dello stepper per restare stabili.
+// Servos are updated slower than the stepper for stability.
 #define SERVO_INTERVAL_MS 30
 
-// Conversione dei limiti in gradi nei limiti in step.
+// Convert degree limits to step limits.
 #define TURRET_MIN_STEPS ((STEPS_PER_REV * TURRET_MIN_ANGLE) / 360)
 #define TURRET_MAX_STEPS ((STEPS_PER_REV * TURRET_MAX_ANGLE) / 360)
 
-// Puntatore alla shield ricevuta dal main. Serve solo per i servo S5/S6.
+// Pointer to the shield provided by main. Used only for servos S5/S6.
 static MotorController* shield = nullptr;
 
-// Stato logico dello stepper orizzontale.
+// Logical state of the horizontal stepper.
 static int currentSteps = 0;
 static int stepIndex = 0;
 static unsigned long lastStepTime = 0;
 static bool stepperEnabled = false;
 
-// Stato logico dei servo di elevazione.
+// Logical state of the elevation servos.
 static int currentServoAngle = 0;
 static unsigned long lastServoUpdateTime = 0;
 
-// Scrive fisicamente una fase sul driver della torretta.
-// Questa e' la stessa sequenza a una bobina del vecchio codice diretto Arduino.
+// Physically write a phase to the turret driver.
+// This is the same single-coil sequence used in the old Arduino direct code.
 static void writeTurretStep(int phase) {
     switch (phase) {
     case 0:
@@ -85,7 +83,7 @@ static void writeTurretStep(int phase) {
     stepperEnabled = true;
 }
 
-// Fa uno step verso destra, se non siamo al limite software.
+// Step one position to the right, if not at the software limit.
 static void stepRight() {
     if (currentSteps >= TURRET_MAX_STEPS) {
         StepperTorretta_stop();
@@ -97,7 +95,7 @@ static void stepRight() {
     currentSteps++;
 }
 
-// Fa uno step verso sinistra, se non siamo al limite software.
+// Step one position to the left, if not at the software limit.
 static void stepLeft() {
     if (currentSteps <= TURRET_MIN_STEPS) {
         StepperTorretta_stop();
@@ -110,13 +108,13 @@ static void stepLeft() {
 }
 
 void StepperTorretta_begin() {
-    // I pin D2-D5 escono dalla shield come pin digitali Arduino.
+    // Pins D2-D5 are exposed by the shield as Arduino digital pins.
     pinMode(TURRET_DRIVER_A_PIN, OUTPUT);
     pinMode(TURRET_DRIVER_B_PIN, OUTPUT);
     pinMode(TURRET_DRIVER_C_PIN, OUTPUT);
     pinMode(TURRET_DRIVER_D_PIN, OUTPUT);
 
-    // Forza subito tutte le uscite a LOW e riparte dalla fase 0.
+    // Immediately force all outputs LOW and start from phase 0.
     stepperEnabled = true;
     StepperTorretta_stop();
     currentSteps = 0;
@@ -126,15 +124,15 @@ void StepperTorretta_begin() {
 void StepperTorretta_updateJoystick(int joystickValue) {
     unsigned long now = millis();
 
-    // Limita la velocita: se non e' passato abbastanza tempo, non fa step.
+    // Limit the speed: if not enough time has passed, do not step.
     if (now - lastStepTime < TURRET_STEP_INTERVAL_MS) {
         return;
     }
 
     lastStepTime = now;
 
-    // Joy2 X sotto il centro gira a sinistra, sopra il centro gira a destra.
-    // Dentro la deadzone spegne il driver per evitare vibrazione.
+    // Joy2 X below center turns left, above center turns right.
+    // Inside the deadzone the driver is turned off to avoid vibration.
     if (joystickValue < JOYSTICK_CENTER - TURRET_JOYSTICK_DEADZONE) {
         stepLeft();
     } else if (joystickValue > JOYSTICK_CENTER + TURRET_JOYSTICK_DEADZONE) {
@@ -145,7 +143,7 @@ void StepperTorretta_updateJoystick(int joystickValue) {
 }
 
 void StepperTorretta_setZero() {
-    // Azzera la posizione logica senza muovere il motore.
+    // Reset the logical position without moving the motor.
     currentSteps = 0;
 }
 
@@ -154,7 +152,7 @@ void StepperTorretta_stop() {
         return;
     }
 
-    // Tutte le uscite basse: il driver non alimenta nessuna bobina.
+    // All outputs low: the driver does not energize any coil.
     digitalWrite(TURRET_DRIVER_A_PIN, LOW);
     digitalWrite(TURRET_DRIVER_B_PIN, LOW);
     digitalWrite(TURRET_DRIVER_C_PIN, LOW);
@@ -167,7 +165,7 @@ int StepperTorretta_getAngle() {
 }
 
 void ServoTorretta_begin(MotorController& controller) {
-    // Salva la shield e porta i servo alla posizione iniziale.
+    // Store the shield pointer and move servos to the initial position.
     shield = &controller;
     ServoTorretta_setZero();
 }
@@ -175,7 +173,7 @@ void ServoTorretta_begin(MotorController& controller) {
 void ServoTorretta_updateJoystick(int joystickValue) {
     unsigned long now = millis();
 
-    // I servo non vengono aggiornati ad ogni loop: 30 ms e' piu' stabile.
+    // Servos are not updated on every loop: 30 ms is more stable.
     if (now - lastServoUpdateTime < SERVO_INTERVAL_MS) {
         return;
     }
@@ -184,7 +182,7 @@ void ServoTorretta_updateJoystick(int joystickValue) {
 
     int nextAngle = currentServoAngle;
 
-    // Joy2 Y abbassa/alza di un grado alla volta.
+    // Joy2 Y lowers/raises one degree at a time.
     if (joystickValue < JOYSTICK_CENTER - TURRET_JOYSTICK_DEADZONE) {
         nextAngle--;
     } else if (joystickValue > JOYSTICK_CENTER + TURRET_JOYSTICK_DEADZONE) {
@@ -201,7 +199,7 @@ void ServoTorretta_setAngle(int angle) {
         return;
     }
 
-    // Blocca l'angolo dentro i limiti meccanici e comanda i due servo specchiati.
+    // Clamp the angle within mechanical limits and command the two mirrored servos.
     currentServoAngle = constrain(angle, ELEVATION_MIN_ANGLE, ELEVATION_MAX_ANGLE);
     shield->servoPairTurn(ELEVATION_SERVO_A, ELEVATION_SERVO_B, currentServoAngle,
                           ELEVATION_MIRROR_BASE);

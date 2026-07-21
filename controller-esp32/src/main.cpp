@@ -4,17 +4,15 @@
 #include "udpSender.h"
 
 /*
- * MAIN DEL CONTROLLER ESP32
+ * ESP32 CONTROLLER MAIN
  *
- * Metodo di funzionamento:
- * 1. Configura joystick/pulsanti.
- * 2. Si collega alla rete WiFi creata dal tank.
- * 3. Ogni 50 ms legge gli ingressi e invia un pacchetto UDP al tank.
- * 4. Se perde il WiFi, continua il loop e tenta automaticamente la riconnessione.
+ * Operation method:
+ * 1. Configure joysticks/buttons.
+ * 2. Connect to the WiFi network created by the tank.
+ * 3. Every 50 ms read inputs and send a UDP packet to the tank.
+ * 4. If WiFi is lost, continue the loop and automatically attempt reconnection.
  */
 
-// 50 ms = 20 pacchetti al secondo. Riduce la pressione sui buffer WiFi e
-// lascia quattro opportunita' di ricezione entro il timeout del tank di 200 ms.
 #define UDP_SEND_INTERVAL_MS 50
 
 static unsigned long lastUdpSendTime = 0;
@@ -22,11 +20,11 @@ static unsigned long lastUdpSendTime = 0;
 void setup() {
     Serial.begin(115200);
 
-    // Configura gli ingressi prima di collegarsi alla rete del tank.
+    // Configure inputs before connecting to the tank network.
     JoystickReader_begin();
     UdpSender_begin();
 
-    Serial.println("Controller pronto");
+    Serial.println("Controller ready");
 }
 
 void loop() {
@@ -36,7 +34,7 @@ void loop() {
     }
     lastUdpSendTime = now;
 
-    // Legge joystick/pulsanti e invia un comando UDP ogni 50 ms.
+    // Read joysticks/buttons and send a UDP command every 50 ms.
     ControllerData data = JoystickReader_read();
     UdpSender_send(data);
 }

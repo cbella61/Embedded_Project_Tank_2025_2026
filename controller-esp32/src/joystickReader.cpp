@@ -1,67 +1,29 @@
 #include "joystickReader.h"
 
-/*
- * METODO DI LETTURA DEL CONTROLLER
- *
- * L'ESP32 legge i quattro assi analogici con analogRead().
- * Ogni lettura viene scalata da 0-4095 a 0-1023, cosi il tank riceve
- * valori semplici con centro intorno a 512.
- *
- * Importante: i joystick reali quasi mai stanno esattamente al centro.
- * Per questo il controller calibra il centro all'avvio e applica una
- * deadzone prima di mandare i dati UDP.
- */
-
-// Primo joystick: movimento del tank e sterzata.
 #define DRIVE_JOYSTICK_X_PIN 34
 #define DRIVE_JOYSTICK_Y_PIN 32
-
-// Secondo joystick: torretta orizzontale ed elevazione.
 #define TURRET_JOYSTICK_X_PIN 35
 #define TURRET_JOYSTICK_Y_PIN 33
-
-// I pulsanti usano INPUT_PULLUP, quindi premuto significa LOW.
 #define ZERO_BUTTON_PIN 25
 #define FIRE_BUTTON_PIN 26
-
-// Scala usata dal protocollo UDP del tank.
+// Scale used by the tank UDP protocol.
 #define JOYSTICK_CENTER 512
 #define AXIS_MIN 0
 #define AXIS_MAX 1023
-
-// Queste deadzone filtrano il rumore ADC attorno al centro fisico calibrato.
-// Non sono la protezione dei motori: quella resta sul tank, dopo il mixing dei cingoli.
-// Per Joy1 guida usiamo un valore piccolo, altrimenti si sommerebbe troppo alla
-// TRACK_COMMAND_DEADZONE del tank e renderebbe poco sensibile la partenza.
-// 20 e' coerente con la tolleranza di riarmo del ricevitore UDP.
+// These deadzones filter ADC noise around the measured physical center.
+// For Joy1 (drive) we use a small value so it does not add too much to the
+// tank's TRACK_COMMAND_DEADZONE and make initial movement insensitive.
 #define DRIVE_INPUT_DEADZONE 20
-
-// Joy2 mantiene la sensibilita' precedente, indipendente dalla guida dei cingoli.
 #define TURRET_INPUT_DEADZONE 80
-
-// Numero di letture usate all'avvio per trovare il centro reale dei joystick.
+// Number of samples used at startup to find the real joystick center.
 #define CALIBRATION_SAMPLES 80
-
-// La calibrazione viene accettata solo con joystick vicino al centro atteso e
-// senza variazioni ampie. I valori vanno verificati sul controller fisico.
+// Calibration tolerance settings.
 #define CALIBRATION_MAX_CENTER_OFFSET 70
 #define CALIBRATION_MAX_SPREAD 40
-
-// Prima di abilitare i comandi, joystick e pulsanti devono restare neutri.
 #define NEUTRAL_ARMING_MS 400
-
-// Il pulsante deve mantenere lo stesso livello per questo tempo prima che il
-// suo stato venga considerato valido.
 #define BUTTON_DEBOUNCE_MS 40
-
-// I joystick sono montati ruotati: scambia fisicamente X con Y su entrambi.
 #define DRIVE_SWAP_X_Y true
 #define TURRET_SWAP_X_Y true
-
-// Usa queste quattro costanti solo per cambiare il verso di un singolo asse.
-// true = 0 diventa 1023 e 1023 diventa 0, mantenendo il centro a 512.
-// DRIVE_X/Y_INVERTED sono l'unica sorgente di verita' per l'orientamento di Joy1:
-// il tank riceve gia' assi normalizzati e corregge soltanto il cablaggio dei motori.
 #define DRIVE_X_INVERTED false
 #define DRIVE_Y_INVERTED false
 #define TURRET_X_INVERTED false
@@ -85,10 +47,17 @@ struct DebouncedButton {
 static DebouncedButton zeroButton = {ZERO_BUTTON_PIN, false, false, 0};
 static DebouncedButton fireButton = {FIRE_BUTTON_PIN, false, false, 0};
 
+/*
+ * CONTROLLER READING METHOD
+ *
+ * The ESP32 reads the four analog axes with analogRead(). Each reading is
+ * scaled from 0-4095 to 0-1023 so the tank receives simple values centered
+ * around 512. Real joysticks rarely rest exactly at center, so the controller
+ * calibrates the center on startup and applies a deadzone before sending UDP.
+ */
 static int readRawJoystick(int pin) {
     int rawValue = analogRead(pin);
-
-    // L'ADC ESP32 legge 0-4095; il firmware tank lavora in 0-1023.
+    // ESP32 ADC reads 0-4095; the tank firmware uses 0-1023.
     return constrain(map(rawValue, 0, 4095, AXIS_MIN, AXIS_MAX), AXIS_MIN, AXIS_MAX);
 }
 
@@ -107,28 +76,25 @@ static bool calibrateAxisCenter(int pin, int& center) {
 
     center = constrain(sum / CALIBRATION_SAMPLES, AXIS_MIN, AXIS_MAX);
 
-    bool closeToExpectedCenter =
-        abs(center - JOYSTICK_CENTER) <= CALIBRATION_MAX_CENTER_OFFSET;
+    bool closeToExpectedCenter = abs(center - JOYSTICK_CENTER) <= CALIBRATION_MAX_CENTER_OFFSET;
     bool stableDuringSampling = maxValue - minValue <= CALIBRATION_MAX_SPREAD;
     return closeToExpectedCenter && stableDuringSampling;
 }
 
-// Legge, ricentra e normalizza un asse. inputDeadzone e' espressa nella scala UDP 0--1023
-// ed e' limitata alla corsa disponibile, cosi' map() non riceve un intervallo degenerato.
+// Read, re-center and normalize an axis.
 static int readCalibratedJoystick(int pin, int center, int inputDeadzone) {
     int raw = readRawJoystick(pin);
     int availableBelowCenter = max(center - AXIS_MIN - 1, 0);
     int availableAboveCenter = max(AXIS_MAX - center - 1, 0);
     int deadzone = constrain(inputDeadzone, 0, min(availableBelowCenter, availableAboveCenter));
 
-    // Zona morta attorno al centro reale misurato all'avvio.
+    // Dead zone around the real center measured at startup.
     if (abs(raw - center) < deadzone) {
         return JOYSTICK_CENTER;
     }
 
-    // Sotto il centro: usa tutta la corsa 0 -> centro per arrivare a 0 -> 512.
-    // Sopra il centro: usa tutta la corsa centro -> 1023 per arrivare a 512 -> 1023.
-    // Cosi' correggiamo il centro senza perdere gli estremi del joystick.
+    // Below center: map full travel 0 -> center to 0 -> 512.
+    // Above center: map full travel center -> 1023 to 512 -> 1023.
     if (raw < center) {
         int lowerCenter = max(center - deadzone, 1);
         return constrain(map(raw, AXIS_MIN, lowerCenter, AXIS_MIN, JOYSTICK_CENTER), AXIS_MIN,
@@ -142,18 +108,16 @@ static int readCalibratedJoystick(int pin, int center, int inputDeadzone) {
 
 static int invertAxisIfNeeded(int value, bool inverted) {
     value = constrain(value, AXIS_MIN, AXIS_MAX);
-
     if (!inverted || value == JOYSTICK_CENTER) {
         return value;
     }
-
     return AXIS_MAX - value;
 }
 
 static bool calibrateJoysticks() {
     Serial.println();
-    Serial.println("=== CALIBRAZIONE JOYSTICK ESP32 ===");
-    Serial.println("Lascia Joy1 e Joy2 fermi al centro...");
+    Serial.println("=== ESP32 JOYSTICK CALIBRATION ===");
+    Serial.println("Leave Joy1 and Joy2 centered...");
     delay(600);
 
     bool driveXValid = calibrateAxisCenter(DRIVE_JOYSTICK_X_PIN, driveXCenter);
@@ -161,24 +125,24 @@ static bool calibrateJoysticks() {
     bool turretXValid = calibrateAxisCenter(TURRET_JOYSTICK_X_PIN, turretXCenter);
     bool elevationYValid = calibrateAxisCenter(TURRET_JOYSTICK_Y_PIN, elevationYCenter);
 
-    Serial.print("Joy1 guida centro: X=");
+    Serial.print("Joy1 drive center: X=");
     Serial.print(driveXCenter);
     Serial.print(" Y=");
     Serial.print(driveYCenter);
     Serial.println();
 
-    Serial.print("Joy2 torretta centro: X=");
+    Serial.print("Joy2 turret center: X=");
     Serial.print(turretXCenter);
     Serial.print(" Y=");
     Serial.println(elevationYCenter);
-    Serial.println("Da ora un asse fermo viene mandato come circa 512.");
+    Serial.println("From now on a steady axis will be sent as approx. 512.");
     Serial.println("===================================");
     Serial.println();
 
     bool valid = driveXValid && driveYValid && turretXValid && elevationYValid;
     if (!valid) {
-        Serial.println("ERRORE: joystick non centrato o instabile.");
-        Serial.println("Comandi inibiti: riavvia lasciando i joystick fermi al centro.");
+        Serial.println("ERROR: joysticks not centered or unstable.");
+        Serial.println("Commands disabled: restart with joysticks held at center.");
     }
 
     return valid;
@@ -219,7 +183,7 @@ static bool axesAreNeutral(int drivePhysicalX, int drivePhysicalY, int turretPhy
 }
 
 void JoystickReader_begin() {
-    // INPUT_PULLUP evita resistenze esterne: il pin sta HIGH e va LOW quando premi.
+    // INPUT_PULLUP avoid external resistors and allows the use of a simple switch to ground.
     pinMode(ZERO_BUTTON_PIN, INPUT_PULLUP);
     pinMode(FIRE_BUTTON_PIN, INPUT_PULLUP);
 
@@ -274,18 +238,18 @@ ControllerData JoystickReader_read() {
         }
 
         commandsArmed = true;
-        Serial.println("Comandi joystick armati.");
+        Serial.println("Joystick commands armed.");
     }
 
     ControllerData data;
 
-    // Joy1 viene usato dal tank per il mixing differenziale dei cingoli.
+    // Joy1 is used by the tank for differential mixing of the tracks.
     int driveX = DRIVE_SWAP_X_Y ? drivePhysicalY : drivePhysicalX;
     int driveY = DRIVE_SWAP_X_Y ? drivePhysicalX : drivePhysicalY;
     data.driveX = invertAxisIfNeeded(driveX, DRIVE_X_INVERTED);
     data.driveY = invertAxisIfNeeded(driveY, DRIVE_Y_INVERTED);
 
-    // Joy2 viene usato dal tank per torretta orizzontale ed elevazione.
+    // Joy2 is used by the tank for horizontal turret and elevation.
     int turretX = TURRET_SWAP_X_Y ? turretPhysicalY : turretPhysicalX;
     int elevationY = TURRET_SWAP_X_Y ? turretPhysicalX : turretPhysicalY;
     data.turretX = invertAxisIfNeeded(turretX, TURRET_X_INVERTED);

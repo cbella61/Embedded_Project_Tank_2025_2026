@@ -1,8 +1,3 @@
-#ifndef PWM_CONTROLLER_H
-#define PWM_CONTROLLER_H
-
-#include <Arduino.h>
-
 /*
  * DRIVER MINIMALE PCA9685
  *
@@ -12,6 +7,12 @@
  * - impostazione frequenza PWM
  * - scrittura dei registri ON/OFF di un canale
  */
+
+#ifndef PWM_CONTROLLER_H
+#define PWM_CONTROLLER_H
+
+#include <Arduino.h>
+
 class PWMController {
   public:
     explicit PWMController(uint8_t address = 0x40);

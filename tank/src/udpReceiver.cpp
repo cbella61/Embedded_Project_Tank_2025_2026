@@ -1,44 +1,44 @@
+/*
+ * TANK UDP RECEIVER
+ *
+ * The tank creates a WiFi access point and receives commands in the format:
+ *
+ * V1;driveX;driveY;turretX;elevationY;zero;fire
+ *
+ * For compatibility with the initial version, parsing uses sscanf and then
+ * clamps axes to the 0--1023 range.
+ */
+
 #include "udpReceiver.h"
 
 #include <WiFiS3.h>
 #include <WiFiUdp.h>
 
-/*
- * RICEVITORE UDP DEL TANK
- *
- * Il tank crea un access point WiFi e riceve comandi nel formato:
- *
- * V1;driveX;driveY;turretX;elevationY;zero;fire
- *
- * Per compatibilita' con la versione iniziale, il parsing usa sscanf e poi
- * limita gli assi nella scala 0--1023.
- */
-
-// Rete WiFi creata dal tank.
+// WiFi network created by the tank.
 const char* WIFI_SSID = "Tank_AP";
 const char* WIFI_PASS = "12345678";
 
-// Canale scelto dopo la scansione 2,4 GHz in universita': sul canale 6 le
-// reti adiacenti sono sensibilmente piu' deboli di Tank_AP. Se l'ambiente
-// cambia, usare una nuova scansione e scegliere preferibilmente 1, 6 oppure 11.
+// Channel chosen after a 2.4 GHz scan: on channel 6 adjacent networks
+// are noticeably weaker than Tank_AP. If the environment changes, perform
+// a new scan and prefer channel 1, 6, or 11.
 #define WIFI_AP_CHANNEL 6
 
-// Porta UDP condivisa da tank e controller.
+// Shared UDP port for tank and controller.
 #define UDP_PORT 4210
 
-// Dopo questo tempo senza pacchetti validi il tank ferma i movimenti.
-// Con invio nominale ogni 20 ms lascia margine per dieci datagrammi persi,
-// ma riduce sensibilmente il tempo massimo con l'ultimo comando attivo.
+// After this time without valid packets the tank stops movement.
+// With nominal sending every 20 ms this leaves margin for ten lost datagrams,
+// but it reduces the maximum time with the last command still active.
 #define CONNECTION_TIMEOUT_MS 200
 
-// Se AP o socket UDP non sono pronti, prova di nuovo con frequenza limitata.
+// If AP or UDP socket are not ready, retry with limited frequency.
 #define NETWORK_RETRY_INTERVAL_MS 3000
 
-// Prima di riarmare dopo boot, timeout o guasto rete richiede tre comandi neutrali.
+// Before rearming after boot, timeout, or network fault require three neutral commands.
 #define REARM_NEUTRAL_PACKET_COUNT 3
 #define REARM_NEUTRAL_TOLERANCE 20
 
-// Valore centrale degli assi joystick in scala 0-1023.
+// Center value for joystick axes on the 0-1023 scale.
 #define JOYSTICK_CENTER 512
 
 static WiFiUDP udp;
@@ -66,7 +66,7 @@ static bool hasValidPacket = false;
 static bool controlsArmed = false;
 static uint8_t consecutiveNeutralPackets = 0;
 
-// Riporta sempre il ricevitore a uno stato che non puo' comandare attuatori.
+// Always bring the receiver to a state that cannot command actuators.
 static void disarmControls() {
     lastCommand = makeSafeCommand();
     lastPacketTime = 0;
@@ -75,13 +75,13 @@ static void disarmControls() {
     consecutiveNeutralPackets = 0;
 }
 
-// Mettere il socket in fault non interrompe il loop: il retry verra' fatto da millis().
+// Putting the socket into fault does not interrupt the loop: retry will be handled by millis().
 static void enterNetworkFault() {
     networkState = NETWORK_FAULT;
     disarmControls();
 }
 
-// Avvia o ripristina AP e UDP. In caso di errore ritorna false e lascia comando sicuro.
+// Start or restore AP and UDP. On error return false and leave a safe command.
 static bool ensureNetworkReady(unsigned long now) {
     if (networkState == NETWORK_READY) {
         return true;
@@ -91,10 +91,10 @@ static bool ensureNetworkReady(unsigned long now) {
         return false;
     }
 
-    Serial.println("Avvio/ripristino Access Point...");
+    Serial.println("Starting/restoring Access Point...");
 
     if (WiFi.beginAP(WIFI_SSID, WIFI_PASS, WIFI_AP_CHANNEL) != WL_AP_LISTENING) {
-        Serial.println("ERRORE: impossibile creare Access Point; retry programmato");
+        Serial.println("ERROR: unable to create Access Point; scheduled retry");
         enterNetworkFault();
         // Timestamp dopo la chiamata: se il coprocessore ha atteso a lungo,
         // il giro successivo non deve ritentare immediatamente.
@@ -103,16 +103,16 @@ static bool ensureNetworkReady(unsigned long now) {
     }
 
     if (udp.begin(UDP_PORT) == 0) {
-        Serial.println("ERRORE: impossibile aprire UDP; retry programmato");
+        Serial.println("ERROR: unable to open UDP; scheduled retry");
         enterNetworkFault();
         lastNetworkAttemptTime = millis();
         return false;
     }
 
     networkState = NETWORK_READY;
-    Serial.print("Access Point e UDP pronti sul canale ");
+    Serial.print("Access Point and UDP ready on channel ");
     Serial.print(WIFI_AP_CHANNEL);
-    Serial.println("; attesa di comandi neutrali.");
+    Serial.println("; awaiting neutral commands.");
     return true;
 }
 
@@ -144,7 +144,7 @@ static void acceptValidCommand(const TankCommand& received, unsigned long now) {
         }
 
         controlsArmed = true;
-        Serial.println("Comandi riarmati dopo posizione neutra");
+        Serial.println("Controls rearmed after neutral position");
     }
 
     lastCommand = received;
@@ -166,7 +166,7 @@ static TankCommand currentCommandOrSafe(unsigned long now) {
 }
 
 void UdpReceiver_begin() {
-    Serial.println("Creazione Access Point...");
+    Serial.println("Creating Access Point...");
 
     disarmControls();
     networkState = NETWORK_FAULT;
@@ -178,10 +178,10 @@ void UdpReceiver_begin() {
 TankCommand UdpReceiver_update() {
     unsigned long now = millis();
 
-    // Se un collegamento gia' attivo e' scaduto, restituisci subito il comando sicuro.
-    // Non chiamare parsePacket() in questo giro: WiFiS3 puo' attendere internamente e
-    // ritardare il brake dei cingoli. Un cutoff hardware resta necessario contro un blocco
-    // che avvenga prima che il firmware possa rilevare la scadenza.
+    // If an already active connection has timed out, immediately return the safe command.
+    // Do not call parsePacket() in this loop: WiFiS3 may block internally and
+    // delay braking the tracks. A hardware cutoff is still necessary against a lock
+    // that happens before the firmware can detect the timeout.
     if (hasValidPacket && now - lastPacketTime >= CONNECTION_TIMEOUT_MS) {
         disarmControls();
         return makeSafeCommand();
@@ -223,7 +223,7 @@ TankCommand UdpReceiver_update() {
                     false,
                 };
 
-                // Il riarmo resta separato dal parser e continua a proteggere boot/reconnect.
+                // Re-arming is kept separate from the parser and continues to protect boot/reconnect.
                 acceptValidCommand(received, millis());
             }
         }
