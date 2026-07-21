@@ -81,7 +81,6 @@ The project uses the following hardware components:
 │   └── src/                    # Joystick reading and UDP transmission
 ├── cad/                        # Source files, editable assemblies, and 3D exports
 │   ├── source/                 # Parametric Fusion 360/OpenSCAD sources
-│   ├── exchange/               # F3D, STEP, and OBJ files
 │   ├── stl/                    # 3D-printable parts
 │   └── reference/              # Technical notes and component references
 ├── docs/                       # Wiring guide and motor-shield manual

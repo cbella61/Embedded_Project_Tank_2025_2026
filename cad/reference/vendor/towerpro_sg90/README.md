@@ -1,7 +1,5 @@
 # TowerPro SG90 - riferimento dimensionale
 
-Componente confermato dalla foto del prototipo: TowerPro SG90.
-
 Fonte del produttore:
 
 - https://towerpro.com.tw/product/sg90-analog/
@@ -20,5 +18,5 @@ Quote usate dal generatore, in millimetri:
 Nel modello i servo sono coricati e inseriti dall'esterno. Le alette originali
 non vengono usate come unico vincolo: una slitta stampata lascia il loro
 ingombro libero e due barrette removibili M2.5 bloccano il corpo. In questo
-modo non e necessario inventare diametro e posizione dei piccoli fori delle
+modo non è necessario inventare diametro e posizione dei piccoli fori delle
 alette.

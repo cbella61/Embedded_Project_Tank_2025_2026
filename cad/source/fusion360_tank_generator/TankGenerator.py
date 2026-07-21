@@ -5762,13 +5762,13 @@ def run(_context):
         f3d_path, step_path = _export(design, build_stage)
         app.activeViewport.fit()
         ui.messageBox(
-            "Modello generato ed esportato.\n\n"
+            "Model generated and exported.\n\n"
             f"F3D: {f3d_path}\nSTEP: {step_path}",
             "Tank Generator",
         )
     except Exception:
         if ui:
-            ui.messageBox("Errore durante la generazione:\n\n" + traceback.format_exc())
+            ui.messageBox("Error during generation:\n\n" + traceback.format_exc())
 
 
 def stop(_context):

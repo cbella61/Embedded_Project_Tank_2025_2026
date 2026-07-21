@@ -142,10 +142,10 @@ def run(context):
                     )
                 )
 
-        summary = "Ispezione completata senza modificare il modello.\n\n"
-        summary += "Documento: " + document_name + "\n"
+        summary = "Inspection completed without modifying the model.\n\n"
+        summary += "Document: " + document_name + "\n"
         summary += "File: " + output_path + "\n\n"
-        summary += "\n".join(body_lines[:12]) if body_lines else "Nessun corpo trovato."
+        summary += "\n".join(body_lines[:12]) if body_lines else "No bodies found."
         ui.messageBox(summary)
     except Exception:
-        ui.messageBox("Errore durante l'ispezione:\n" + traceback.format_exc())
+        ui.messageBox("Error during inspection:\n" + traceback.format_exc())
