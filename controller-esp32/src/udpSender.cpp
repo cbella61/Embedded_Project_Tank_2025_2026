@@ -22,27 +22,33 @@ const char* WIFI_PASS = "12345678";
 // Stampa coordinate una volta al secondo.
 #define COORDINATE_PRINT_INTERVAL_MS 1000
 
-// Se il WiFi cade, prova a ricollegarsi senza bloccare il loop.
-#define WIFI_RECONNECT_INTERVAL_MS 3000
+// WiFi.begin() e' asincrona: in un ambiente radio affollato associazione e DHCP
+// possono richiedere vari secondi. Non interrompere un tentativo gia' in corso
+// prima di questo limite.
+#define WIFI_CONNECTION_ATTEMPT_TIMEOUT_MS 10000
 
-// Un socket UDP locale fallito viene riprovato prima della reconnessione WiFi completa.
-#define UDP_SOCKET_RECOVERY_INTERVAL_MS 200
+// Solo un socket che non riesce ad aprirsi viene riprovato. L'attesa evita
+// allocazioni e bind ripetuti mentre la memoria di rete e' sotto pressione.
+#define UDP_SOCKET_RECOVERY_INTERVAL_MS 1000
 
-// Un singolo ENOMEM di sendto() puo' essere transitorio. Il socket viene chiuso
-// solo dopo piu' invii consecutivi falliti.
+// Un singolo ENOMEM di sendto() puo' essere transitorio. Dopo piu' invii
+// consecutivi falliti si sospende brevemente il TX, ma non si ricrea il socket.
 #define UDP_SEND_FAILURE_LIMIT 3
+#define UDP_TX_FAULT_BACKOFF_MS 100
 
 static WiFiUDP udp;
 
 // IP tipico dell'access point Arduino. Se il gateway WiFi e' disponibile, viene aggiornato.
 static IPAddress tankIP(192, 168, 4, 1);
 static unsigned long lastCoordinatePrintTime = 0;
-static unsigned long lastReconnectAttemptTime = 0;
+static unsigned long lastWifiConnectionStartTime = 0;
 static unsigned long lastSocketRecoveryAttemptTime = 0;
 static bool wifiWasConnected = false;
 static bool udpReady = false;
 static bool suppressCommandAfterConnection = false;
 static uint8_t consecutiveUdpSendFailures = 0;
+static unsigned long lastUdpSendFailureTime = 0;
+static bool udpFaultReported = false;
 
 // Controlla se un IP e' 0.0.0.0, cioe' non valido.
 static bool isEmptyIp(IPAddress ip) {
@@ -51,24 +57,65 @@ static bool isEmptyIp(IPAddress ip) {
 
 static void resetUdpSendFailures() {
     consecutiveUdpSendFailures = 0;
+    udpFaultReported = false;
 }
 
-// ENOMEM da endPacket() puo' essere dovuto a un buffer WiFi momentaneamente pieno.
-// Non interrompiamo subito il controllo per un solo datagramma perso; dopo tre errori
-// chiudiamo il socket e lo riapriamo con un retry breve, imponendo poi la neutralita'.
+// Il confronto con sottrazione unsigned resta corretto anche al wrap di millis().
+static bool udpTxBackoffActive(unsigned long now) {
+    return consecutiveUdpSendFailures >= UDP_SEND_FAILURE_LIMIT &&
+           now - lastUdpSendFailureTime < UDP_TX_FAULT_BACKOFF_MS;
+}
+
+static const char* wifiStatusName(wl_status_t status) {
+    switch (status) {
+        case WL_IDLE_STATUS:
+            return "IDLE";
+        case WL_NO_SSID_AVAIL:
+            return "SSID_NON_TROVATO";
+        case WL_SCAN_COMPLETED:
+            return "SCAN_COMPLETATO";
+        case WL_CONNECTED:
+            return "COLLEGATO";
+        case WL_CONNECT_FAILED:
+            return "CONNESSIONE_FALLITA";
+        case WL_CONNECTION_LOST:
+            return "CONNESSIONE_PERSA";
+        case WL_DISCONNECTED:
+            return "DISCONNESSO";
+        default:
+            return "STATO_SCONOSCIUTO";
+    }
+}
+
+// Avvia un solo tentativo WiFi controllato. Il reset esplicito e' usato solo
+// dopo che il tentativo precedente ha avuto 10 s per completare, oppure dopo
+// una perdita di collegamento gia' confermata da WiFi.status().
+static void startWifiConnectionAttempt(unsigned long now, bool resetConnection) {
+    lastWifiConnectionStartTime = now;
+
+    if (resetConnection) {
+        // Non cancella le credenziali memorizzate in RAM; prepara una nuova
+        // associazione senza attendere in modo bloccante.
+        WiFi.disconnect(false, false);
+    }
+
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+}
+
+// ENOMEM da endPacket() indica che sendto() non puo' accodare il datagramma nella
+// pila WiFi/lwIP. Chiudere e riaprire il socket qui richiederebbe una nuova
+// allocazione del buffer UDP da 1460 byte, peggiorando proprio questa condizione.
 static void registerUdpSendFailure() {
     if (consecutiveUdpSendFailures < UDP_SEND_FAILURE_LIMIT) {
         consecutiveUdpSendFailures++;
     }
 
-    if (consecutiveUdpSendFailures < UDP_SEND_FAILURE_LIMIT) {
-        return;
-    }
+    lastUdpSendFailureTime = millis();
 
-    udp.stop();
-    udpReady = false;
-    lastSocketRecoveryAttemptTime = millis();
-    Serial.println("UDP TX fallito ripetutamente: recupero socket programmato");
+    if (consecutiveUdpSendFailures == UDP_SEND_FAILURE_LIMIT && !udpFaultReported) {
+        udpFaultReported = true;
+        Serial.println("UDP TX temporaneamente saturo: pausa di recupero programmata");
+    }
 }
 
 // Aggiorna l'indirizzo del tank e riapre UDP dopo ogni nuova connessione.
@@ -104,19 +151,18 @@ static bool configureUdpConnection() {
 }
 
 // Ritorna true quando il controller puo' inviare dati al tank.
-// In caso di perdita WiFi, tenta la riconnessione ogni 3 secondi senza delay().
+// In caso di perdita WiFi usa un solo retry controllato, senza delay().
 static bool ensureWifiConnected() {
     unsigned long now = millis();
 
     if (WiFi.status() == WL_CONNECTED) {
         if (!wifiWasConnected) {
             wifiWasConnected = true;
-            lastReconnectAttemptTime = now;
             return configureUdpConnection();
         }
 
-        // Anche con WiFi associato, il socket puo' aver fallito localmente.
-        // Il recupero UDP e' rapido; i 3 secondi restano riservati alla perdita WiFi reale.
+        // Anche con WiFi associato, l'apertura iniziale del socket puo' fallire.
+        // Gli errori ENOMEM di invio, invece, vengono gestiti senza ricrearlo.
         if (!udpReady && now - lastSocketRecoveryAttemptTime >= UDP_SOCKET_RECOVERY_INTERVAL_MS) {
             lastSocketRecoveryAttemptTime = now;
             return configureUdpConnection();
@@ -131,17 +177,22 @@ static bool ensureWifiConnected() {
         resetUdpSendFailures();
         udp.stop();
         Serial.println("WiFi perso: il tank entrera' in timeout di sicurezza");
+
+        // Dopo una connessione realmente attiva si puo' iniziare subito un
+        // nuovo tentativo; il successivo reset e' comunque ritardato di 10 s.
+        startWifiConnectionAttempt(now, true);
+        return false;
     }
 
-    if (now - lastReconnectAttemptTime >= WIFI_RECONNECT_INTERVAL_MS) {
-        lastReconnectAttemptTime = now;
-        Serial.println("Tentativo di riconnessione a Tank_AP...");
+    if (now - lastWifiConnectionStartTime >= WIFI_CONNECTION_ATTEMPT_TIMEOUT_MS) {
+        Serial.print("Nuovo tentativo WiFi controllato a Tank_AP (stato: ");
+        Serial.print(wifiStatusName(WiFi.status()));
+        Serial.println(")...");
 
-        // reconnect() riusa SSID e password impostati da WiFi.begin().
-        // Se non parte, begin() ricrea esplicitamente la connessione station.
-        if (!WiFi.reconnect()) {
-            WiFi.begin(WIFI_SSID, WIFI_PASS);
-        }
+        // WiFi.reconnect() forza una disconnessione ad ogni chiamata. Non lo
+        // usiamo qui: ogni tentativo riceve prima il tempo necessario per
+        // completare associazione e DHCP anche in presenza di molta congestione.
+        startWifiConnectionAttempt(now, true);
     }
 
     return false;
@@ -153,14 +204,15 @@ void UdpSender_begin() {
 
     WiFi.mode(WIFI_STA);
     WiFi.persistent(false);
-    WiFi.setAutoReconnect(true);
+    // Il firmware gestisce i retry per non sovrapporsi al reconnect automatico
+    // del core ESP32, che potrebbe interrompere una connessione in corso.
+    WiFi.setAutoReconnect(false);
     // Evita i ritardi del modem-sleep durante il controllo manuale.
     // Aumenta il consumo del controller, ma non sostituisce una buona alimentazione.
     WiFi.setSleep(false);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    startWifiConnectionAttempt(millis(), false);
     udpReady = false;
     resetUdpSendFailures();
-    lastReconnectAttemptTime = millis();
     lastSocketRecoveryAttemptTime = millis();
 }
 
@@ -175,6 +227,12 @@ void UdpSender_send(const ControllerData& data) {
     // finche' joystick e pulsanti non sono neutrali e rilasciati.
     if (suppressCommandAfterConnection) {
         suppressCommandAfterConnection = false;
+        return;
+    }
+
+    // Dopo tre ENOMEM consecutivi lascia tempo alla coda WiFi per svuotarsi.
+    // Se la radio non recupera, il timeout indipendente del tank ferma il mezzo.
+    if (udpTxBackoffActive(millis())) {
         return;
     }
 

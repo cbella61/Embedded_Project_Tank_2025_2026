@@ -32,7 +32,7 @@
 #define TURRET_DRIVER_D_PIN 5
 
 // Piu' alto significa torretta piu' lenta.
-#define TURRET_STEP_INTERVAL_MS 2
+#define TURRET_STEP_INTERVAL_MS 5
 
 // Valori joystick vicino al centro che non muovono torretta o elevazione.
 #define TURRET_JOYSTICK_DEADZONE 200

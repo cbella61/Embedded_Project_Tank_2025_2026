@@ -18,6 +18,11 @@
 const char* WIFI_SSID = "Tank_AP";
 const char* WIFI_PASS = "12345678";
 
+// Canale scelto dopo la scansione 2,4 GHz in universita': sul canale 6 le
+// reti adiacenti sono sensibilmente piu' deboli di Tank_AP. Se l'ambiente
+// cambia, usare una nuova scansione e scegliere preferibilmente 1, 6 oppure 11.
+#define WIFI_AP_CHANNEL 6
+
 // Porta UDP condivisa da tank e controller.
 #define UDP_PORT 4210
 
@@ -88,7 +93,7 @@ static bool ensureNetworkReady(unsigned long now) {
 
     Serial.println("Avvio/ripristino Access Point...");
 
-    if (WiFi.beginAP(WIFI_SSID, WIFI_PASS) != WL_AP_LISTENING) {
+    if (WiFi.beginAP(WIFI_SSID, WIFI_PASS, WIFI_AP_CHANNEL) != WL_AP_LISTENING) {
         Serial.println("ERRORE: impossibile creare Access Point; retry programmato");
         enterNetworkFault();
         // Timestamp dopo la chiamata: se il coprocessore ha atteso a lungo,
@@ -105,7 +110,9 @@ static bool ensureNetworkReady(unsigned long now) {
     }
 
     networkState = NETWORK_READY;
-    Serial.println("Access Point e UDP pronti; attesa di comandi neutrali.");
+    Serial.print("Access Point e UDP pronti sul canale ");
+    Serial.print(WIFI_AP_CHANNEL);
+    Serial.println("; attesa di comandi neutrali.");
     return true;
 }
 
