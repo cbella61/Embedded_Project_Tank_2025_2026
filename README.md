@@ -2,7 +2,7 @@
 
 Embedded project for a Wi-Fi remote-controlled tank. An ESP32 controller reads two joysticks and two buttons, then sends UDP commands to an Arduino Uno R4 WiFi mounted on the tank. The Arduino controls the tracks, turret rotation and elevation, and the cannon relay.
 
-> The YouTube video will be added here after publication: **[link to be added]**.
+> YouTube video: [Project demonstration](https://youtu.be/Sw5uwZuhA9w)
 
 ## Features
 
@@ -30,7 +30,7 @@ Embedded project for a Wi-Fi remote-controlled tank. An ESP32 controller reads t
 | 2 | Analog joystick modules | Driving, turret rotation, and elevation |
 | 2 | Momentary push buttons | Zeroing and relay control |
 | 1 | 5 V relay module | Controls the cannon load |
-| 1 | 7.4 V battery and, if needed, a buck converter | Tank and servo power supply |
+| 1 | 7.4 V battery | Tank and servo power supply |
 | - | Wires, connectors, screws, and printed parts | Wiring and mechanical assembly |
 
 For pin assignments, power supply, jumpers, and safety precautions, see the [wiring guide](docs/tank_shield_wiring_guide.md) and its [PDF version](docs/tank_shield_wiring_guide.pdf).
@@ -41,9 +41,34 @@ For pin assignments, power supply, jumpers, and safety precautions, see the [wir
 - Arduino framework, installed automatically by PlatformIO;
 - USB data cables for the Arduino Uno R4 WiFi and ESP32;
 - appropriate USB drivers for the serial ports of both boards;
-- Autodesk Fusion 360, FreeCAD, or STEP-compatible software only to edit/inspect the CAD model.
+- Autodesk Fusion 360 to design and edit the CAD model;
+- [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer) to prepare the parts for 3D printing;
+- a STEP-compatible CAD viewer, such as FreeCAD, for inspecting exported models.
 
 The repository includes the project's application code, including the local `PWMController` and `motorController` drivers. Platform dependencies (Arduino core, WiFiS3, and WiFi/ESP32) are provided by the PlatformIO-selected frameworks and are not duplicated in this repository.
+
+### Tools used by the team
+
+- Visual Studio Code and PlatformIO for firmware development and upload;
+- Autodesk Fusion 360 for the mechanical CAD design and editable assemblies;
+- OrcaSlicer for slicing and preparing the components for 3D printing.
+
+### Complete hardware list
+
+The project uses the following hardware components:
+
+- Arduino Uno R4 WiFi mounted on the tank;
+- ESP32 Dev Module used as the handheld controller;
+- Emakefun PS2X & Motor Drive Board with its PCA9685 PWM controller;
+- two DC gear motors with tracks;
+- one 28BYJ-48 stepper motor and its external driver for turret rotation;
+- two TowerPro SG90 servo motors for turret elevation;
+- two dual-axis analog joystick modules;
+- two momentary push buttons for zeroing and firing;
+- one 5 V relay module;
+- the electromagnetic cannon/solenoid and its power supply;
+- a 7.4 V battery pack;
+- wiring, connectors, common-ground connections, screws, and 3D-printed mechanical parts.
 
 ## Project Layout
 
@@ -136,18 +161,30 @@ The relay only accepts a new command after a 12-second cooldown. If the tank doe
 - [Editable wiring guide](docs/tank_shield_wiring_guide.md)
 - [Wiring guide PDF](docs/tank_shield_wiring_guide.pdf)
 - [Emakefun PS2X & Motor Drive Board manual](docs/PS2X_MotorDriveBoard_InstructionManual_V1.4.pdf)
-- YouTube video: **link to be added after publication**
+- [YouTube project demonstration](https://youtu.be/Sw5uwZuhA9w)
 
 ## Team Members and Contributions
 
-Add the final team members before submission. To make contributions clear for assessment, use the following format and replace the placeholders:
+The work was divided by source file and subsystem as follows:
+
+Most of the project work was carried out collaboratively by the whole team. The file and subsystem division below identifies the main responsibility or the most significant contribution of each member; it is not intended to imply that the other members did not participate in, review, test, or support those activities.
 
 | Team member | Contribution |
 | --- | --- |
-| `[First name Last name]` | Embedded architecture, Arduino tank firmware, and actuator integration |
-| `[First name Last name]` | ESP32 firmware, joysticks, Wi-Fi, and UDP protocol |
-| `[First name Last name]` | CAD design, 3D printing/mechanical assembly, and wiring |
-| `[First name Last name]` | Testing, documentation, and presentation |
+| Francesco Martellla | `controller-esp32/src/main.cpp` and `tank/src/main.cpp`; technical drawing; CAD work with Alice and Selmir; 3D-printing work with Alice |
+| Alice Sedioli | `controller-esp32/src/joystickReader.*`, `controller-esp32/src/udpSender.*`, and `tank/src/udpReceiver.*`; UDP communication with Selmir and Christian; CAD work with Francesco and Selmir; 3D-printing work with Francesco |
+| Christian Bella | `tank/lib/PWMController/*` and `tank/lib/motorController/*`; UDP communication with Alice and Selmir; component selection; local hardware-library implementation |
+| Selmir Kusi | `tank/src/servoTorretta.*` and `tank/src/trackController.*`; UDP communication with Alice and Christian; turret and track control; CAD work with Alice and Francesco |
+
+### Shared contributions
+
+- **UDP communication:** Alice, Selmir, and Christian collaborated on the communication path between the ESP32 controller and the Arduino tank, including packet transmission, reception, and safe timeout behavior.
+- **Turret and tracks:** Selmir implemented the turret and track-control logic.
+- **Libraries:** Christian implemented the local PWM and motor-control libraries used by the tank firmware.
+- **CAD design:** Alice, Selmir, and Francesco collaborated on the Fusion 360 mechanical design.
+- **Technical drawing:** Francesco prepared the technical drawings.
+- **3D printing:** Alice and Francesco prepared and printed the mechanical parts using OrcaSlicer.
+- **Component selection:** Christian contributed to selecting the electronic and electromechanical components.
 
 ## License
 
